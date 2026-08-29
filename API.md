@@ -7,13 +7,37 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
 
 ---
 
+## 最近更新
+
+### 2026-08
+
+- **新增手机号验证码登录/注册/换绑**
+  - 新增接口：`POST /user/sms/send`、`/user/sms/register`、`/user/sms/login`、`/user/sms/bind`
+  - 使用阿里云「号码认证服务 - 短信认证」（Dypnsapi）下发和校验验证码
+  - 注册一步完成建号 + 建绑；登录直接签发 session
+- **iOS fingerprint_hash 冲突解决**
+  - Android 保持 `fingerprint_hash` 全局唯一
+  - iOS 允许同一指纹在不同用户下重复，登录时按 `(user_id, fingerprint_hash)` 定位设备
+  - 数据库需取消 `fingerprints.uk_fingerprints_hash` 全局唯一索引
+- **文档补充**
+  - 新增附录 F（阿里云验证码 2.0）、附录 G（LLM 二次审核）、附录 H（阿里云短信认证服务）
+- **测试清理**
+  - 删除原有 4 个无法运行的 `*.spec.ts` 文件（依赖缺失 / 含硬编码 AK）
+
+---
+
 ## 目录
 
 - [用户系统 API](#用户系统-api)
   - [1. GET /user/pow-challenge](#1-get-userpow-challenge)
   - [2. POST /user/check](#2-post-usercheck)
   - [3. POST /user/register](#3-post-userregister)
+  - [3b. POST /user/registerV2](#3b-post-userregisterv2)
   - [4. POST /user/login](#4-post-userlogin)
+  - [4b. POST /user/sms/send](#4b-post-usersmssend)
+  - [4c. POST /user/sms/register](#4c-post-usersmsregister)
+  - [4d. POST /user/sms/login](#4d-post-usersmslogin)
+  - [4e. POST /user/sms/bind](#4e-post-usersmsbind)
   - [5. POST /user/session/create](#5-post-usersessioncreate)
   - [6. POST /user/session/validate](#6-post-usersessionvalidate)
   - [7. POST /user/profile](#7-post-userprofile)
@@ -54,6 +78,9 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
 - [附录 C: 注册 / 登录流程](#附录-c-注册--登录流程)
 - [附录 D: Session 使用](#附录-d-session-使用)
 - [附录 E: Realtime / Socket.IO](#附录-e-realtime--socketio)
+- [附录 F: 阿里云验证码 2.0](#附录-f-阿里云验证码-20)
+- [附录 G: LLM 二次内容审核](#附录-g-llm-二次内容审核)
+- [附录 H: 阿里云短信认证服务](#附录-h-阿里云短信认证服务)
 - [环境变量](#环境变量)
 - [数据库迁移](#数据库迁移)
 - [开发](#开发)
@@ -74,7 +101,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 {
   "challenge_id": "a1b2...",
   "challenge": "e5f6...",
-  "difficulty": 21
+  "difficulty": 18
 }
 ```
 
@@ -167,6 +194,54 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 
 ---
 
+### 3b. POST /user/registerV2
+
+创建用户（阿里云验证码 2.0「无痕验证」版）。需 **Captcha + PoW**。指纹冲突时返回 400。
+与 v1 `register` 并存：v2 走 `verification_captcha`，v1 仍走 `verification_turnstile`，互不影响。
+
+**请求**
+
+```json
+{
+  "user_display_id": "昵称（1-100字符）",
+  "device_finger_print": { "platform": "android", "android": {...} },
+  "verification_captcha": "阿里云验证码 captchaVerifyParam（客户端原样透传）",
+  "verification_pow": {
+    "challenge_id": "来自 pow-challenge",
+    "nonce": 123456
+  }
+}
+```
+
+**响应** `201`（同 v1）
+
+```json
+{
+  "user_token": "16位hex",
+  "device_secret": "64位hex"
+}
+```
+
+**错误**
+
+| 状态码 | message |
+|---|---|
+| 400 | `该设备环境已注册` |
+| 400 | `NAME_TAKEN` |
+| 400 | `NAME_EMPTY` |
+| 400 | `验证码已使用或过期，请重新验证`（F008：token 一次性，重试须重新取 token） |
+| 400 | `访问过于频繁，请稍后重试`（F010） |
+| 400 | `验证码校验失败，请重试` |
+| 400 | `验证码服务异常，请重试` |
+| 400 | `验证码服务未配置`（服务端缺 `CAPTCHA_SCENE_ID` / AK） |
+| 400 | `PoW 验证失败` |
+
+与 v1 的差异：`captchaVerifyParam` 为**一次性**（复用/过期返回 F008、约 20 分钟过期），服务端**不做 Redis 缓存复用**；注册失败后客户端须重新 `getToken()` 再试。
+
+成功后的落库与 v1 相同（users / devices / fingerprints / 两个 history，**不写** `user_device_binding`，须再 `/user/login` 或 `/user/binding/create` 建绑）。
+
+---
+
 ### 4. POST /user/login
 
 建绑本机并**轮换** `device_secret`；**不**签发 session。  
@@ -224,6 +299,166 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 400 | `用户绑定设备数已达上限` / `设备绑定用户数已达上限` | |
 
 若本机**已有**该用户的活绑定，`login` 只轮换 secret，**不需要**转移申请。建绑后须再调 `session/create` 拿 session。
+
+---
+
+### 4b. POST /user/sms/send
+
+发送短信验证码到指定手机号。调用阿里云「号码认证服务 - 短信认证」接口 `SendSmsVerifyCode`，由阿里云负责验证码生成、存储和生命周期管理。
+
+同一手机号 60 秒内不可重复发送，24 小时内最多 10 条；同一 IP 1 分钟内最多 5 条。阿里云侧也有自身的频率控制和防刷策略。
+
+**请求**
+
+```json
+{
+  "phone": "13800138000",
+  "scene": "register"
+}
+```
+
+`scene` 可选：`register` | `login` | `bind`。
+
+**响应** `200`
+
+```json
+{
+  "sent": true,
+  "cooldown_seconds": 60
+}
+```
+
+若处于冷却期：`sent: false`，`cooldown_seconds` 为剩余秒数。
+
+**错误**
+
+| 状态码 | message | 说明 |
+|---|---|---|
+| 400 | `SMS_DAILY_LIMIT_EXCEEDED` | 该手机号 24 小时内发送次数已达上限 |
+| 400 | `SMS_IP_RATE_LIMIT_EXCEEDED` | 当前 IP 发送过于频繁 |
+| 400 | `SMS_SEND_FAILED` | 短信服务商调用失败 |
+
+---
+
+### 4c. POST /user/sms/register
+
+手机号验证码注册（新账号）。一步完成建号 + 建绑，返回 `user_token` + `device_secret`；后续仍需调 `/user/session/create` 拿 session。
+
+**请求**
+
+```json
+{
+  "phone": "13800138000",
+  "code": "123456",
+  "user_display_id": "昵称",
+  "device_finger_print": { "platform": "ios", "ios": {...} },
+  "verification_turnstile": "Cloudflare Turnstile token",
+  "verification_pow": {
+    "challenge_id": "...",
+    "nonce": 123456
+  }
+}
+```
+
+**响应** `201`
+
+```json
+{
+  "user_token": "16位hex",
+  "device_secret": "64位hex"
+}
+```
+
+**特性**
+
+- 与 `/user/register` 一样保留 Turnstile + PoW 防刷。
+- 事务内同时写入 `users`、`devices`、`fingerprints`、`user_device_binding`（active）及两个 history 表。
+- iOS 设备允许 `fingerprint_hash` 重复（不同用户各自独立建绑）。
+
+**错误**
+
+| 状态码 | message |
+|---|---|
+| 400 | `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED` |
+| 400 | `PHONE_TAKEN` |
+| 400 | `NAME_TAKEN` |
+| 400 | `Turnstile 验证失败` / `PoW 验证失败` |
+
+---
+
+### 4d. POST /user/sms/login
+
+手机号验证码登录（已存在账号）。直接签发 session，无需再走 `/user/login` + `/user/session/create`。
+
+**请求**
+
+```json
+{
+  "phone": "13800138000",
+  "code": "123456",
+  "fingerprint_hash": "当前设备指纹 SHA-256 hex"
+}
+```
+
+**响应** `200`
+
+```json
+{
+  "session_id": 1,
+  "session_secret": "64位hex"
+}
+```
+
+**校验链路**
+
+1. 校验短信验证码
+2. 通过 `phone` 找到用户
+3. 在该用户的绑定范围内匹配 `fingerprint_hash` 定位设备（兼容 iOS 重复指纹）
+4. 检查 `session:device_owner` 切号锁
+5. 若尚无绑定则自动建绑
+6. 轮换 `device_secret`，签发 session
+
+**错误**
+
+| 状态码 | message | 说明 |
+|---|---|---|
+| 400 | `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED` | |
+| 401 | `USER_NOT_FOUND` | 该手机号未注册 |
+| 401 | `FINGERPRINT_MISMATCH` | 该用户下无匹配指纹设备 |
+| 400 | `DEVICE_SESSION_LOCKED` | 本机切号锁被异用户占用 |
+| 400 | `REBIND_COOLDOWN` / `TRANSFER_REQUIRED` / `TRANSFER_INVALID` | 建绑受限 |
+
+---
+
+### 4e. POST /user/sms/bind
+
+🔒 当前 session 用户绑定/换绑手机号。
+
+**请求**
+
+```json
+{
+  "session_id": 1,
+  "session_secret": "...",
+  "phone": "13800138000",
+  "code": "123456"
+}
+```
+
+**响应** `200`
+
+```json
+{
+  "phone": "13800138000"
+}
+```
+
+**错误**
+
+| 状态码 | message |
+|---|---|
+| 400 | `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED` |
+| 400 | `PHONE_TAKEN` | 该手机号已被其他用户绑定 |
 
 ---
 
@@ -974,7 +1209,15 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 | `title` | 必填，最长 255 |
 | `content` | 可选 |
 | `is_anonymous` | 可选，默认 `false`；为 `true` 时对外 `author` 为 `null` |
-| `category` | 可选，`问答` \| `资料` \| `兴趣` \| `梗图`；缺省默认「默认」 |
+| `category` | 可选，`问答` \| `资料` \| `兴趣` \| `梗图`；缺省时先存「默认」，再由 AI 异步分类更新（见下） |
+
+**AI 自动分类**（缺省 `category` 时）：
+
+- 发帖成功后异步调用大模型（默认硅基流动 `Qwen/Qwen2.5-VL-7B-Instruct`，OpenAI 兼容接口）判断品类：纯文本按标题+正文语义；**有图片时发视觉模型识图**（最多 `AI_CLASSIFY_MAX_IMAGES` 张，默认 4）
+- 模型返回 JSON `{"category": "..."}`，服务端校验必须落在 `问答/资料/兴趣/梗图/默认` 五值之一，**非法或调用报错一律保持「默认」**
+- 分类为异步：发帖响应不等待模型，返回时 `category` 为「默认」，随后自动更新到 MySQL 与 ES 索引（前端可刷新列表看到最终品类）
+- 显式传了 `category` 的帖子**不触发** AI 分类，尊重用户选择
+- 未配置 `SILICONFLOW_API_KEY` 时跳过 AI 分类，等价于全部「默认」
 | `uploaded` | 可选，最多 13 项；图片合计 ≤12 张且总大小 ≤8MB；单附件 ≤3.5MB |
 | `uploaded[].type` | `image` \| `attachment` |
 | `uploaded[].filename` | 预上传返回的服务端文件名 |
@@ -1531,6 +1774,25 @@ ios_sysname, ios_machine, ios_nodename
 
 若本地 secret 已因他人 `login` 轮换而失效 → 改走 `/user/login` 拿新 secret。
 
+**手机号验证码注册 / 登录（推荐 iOS / 简化流程）**
+
+```
+注册：
+1. POST /user/sms/send { phone, scene: 'register' }
+2. 输入短信验证码
+3. POST /user/sms/register { phone, code, user_display_id, device_finger_print, turnstile, pow }
+   → user_token + device_secret（已同时建绑）
+4. POST /user/session/create → session
+
+登录：
+1. POST /user/sms/send { phone, scene: 'login' }
+2. 输入短信验证码
+3. POST /user/sms/login { phone, code, fingerprint_hash }
+   → session_id + session_secret
+```
+
+iOS 下同一指纹可注册多个用户；登录时通过 `(user_id, fingerprint_hash)` 定位该用户的设备。
+
 **设备管理**
 
 ```
@@ -1708,6 +1970,236 @@ payload 示例：
 
 ---
 
+## 附录 F: 阿里云验证码 2.0
+
+### 1. 功能与触发时机
+
+阿里云验证码 2.0（无痕验证 / 智能验证）用于 `POST /user/registerV2`，替代 v1 的 Cloudflare Turnstile。
+
+- 客户端接入阿里云验证码 2.0 SDK 获取 `captchaVerifyParam`。
+- 注册时把该参数原样放在 `verification_captcha` 字段提交。
+- 服务端通过 `CaptchaStrategy` 向阿里云 `VerifyIntelligentCaptcha` 接口二次校验。
+- 校验通过后再校验 PoW，最后执行与 v1 相同的建号逻辑。
+
+### 2. 环境变量
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `ALIBABA_CLOUD_ACCESS_KEY_ID` | 是 | 阿里云 RAM 子账号 AccessKey ID |
+| `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | 是 | 阿里云 RAM 子账号 AccessKey Secret |
+| `CAPTCHA_SCENE_ID` | 是 | 验证码 2.0 控制台创建的场景 ID |
+| `CAPTCHA_ENDPOINT` | 否 | 默认 `captcha.cn-shanghai.aliyuncs.com` |
+
+### 3. 阿里云控制台配置
+
+1. 进入 [阿里云验证码 2.0 控制台](https://captcha.console.aliyun.com/)。
+2. 创建场景：
+   - 场景类型选择「无痕验证」或「智能验证」。
+   - 记录场景 ID，填入 `CAPTCHA_SCENE_ID`。
+3. 按客户端平台（Web / iOS / Android）接入官方 SDK，调用 `getToken()` 或等价方法拿到 `captchaVerifyParam`。
+4. 在 RAM 控制台给子账号授权：至少包含 `captcha:VerifyIntelligentCaptcha` 权限。
+
+### 4. 关键文件
+
+| 路径 | 说明 |
+|---|---|
+| `src/user/verification/captcha.strategy.ts` | 核心策略类 |
+| `src/user/verification/verification.service.ts` | 按 `method` 路由到具体策略 |
+| `src/user/user.service.login.ts` | `registerV2` 业务入口 |
+| `src/user/user.controller.ts` | `POST /user/registerV2` 路由 |
+| `src/user/dto/register-v2.dto.ts` | DTO |
+
+### 5. 特殊行为
+
+- `captchaVerifyParam` **必须原样透传**，禁止修改。
+- token **一次性**：复用或过期返回 `F008`；服务端**不缓存**，注册失败后客户端必须重新获取。
+- 服务端**不调用 consume**：token 由阿里云侧一次性消费，注册成功只需 consume PoW。
+- 缺配置时返回 `400 验证码服务未配置`；调用异常时返回 `400 验证码服务异常，请重试`，不会绕过验证。
+
+| 阿里云 verifyCode | 返回给客户端 |
+|---|---|
+| `F008` | `验证码已使用或过期，请重新验证` |
+| `F010` | `访问过于频繁，请稍后重试` |
+| `F012` | `场景配置错误，请稍后重试` |
+| 其他 | `验证码校验失败，请重试` |
+
+---
+
+## 附录 G: LLM 二次内容审核
+
+### 1. 功能与触发时机
+
+在阿里云内容审核（绿网）之后，增加一层 LLM 二次审核，用于发现规则引擎可能漏掉的违规内容。
+
+触发接口：
+
+- `POST /posts`：审核帖子标题 + 正文。
+- `POST /file-processor/upload`（`type=image`）：审核上传图片。
+
+`ModerationService` 内部固定顺序：
+
+```text
+阿里云审核 → 若未通过直接拦截
+        ↓ 通过
+LLM 二次审核 → 若未通过拦截
+        ↓ 通过
+放行（合并低置信度标签）
+```
+
+> 当前 `POST /posts/comment`（回复）**未**调用内容审核。
+
+### 2. 环境变量
+
+| 变量 | 必填 | 默认值 | 说明 |
+|---|---|---|---|
+| `SILICONFLOW_API_KEY` | 条件 | — | 若未单独配 `LLM_MODERATION_API_KEY`，则复用此 key |
+| `LLM_MODERATION_ENABLED` | 否 | `true`（依赖 key 存在） | 显式 `false` 关闭 |
+| `LLM_MODERATION_API_KEY` | 否 | 复用 `SILICONFLOW_API_KEY` | 审核专用 key |
+| `LLM_MODERATION_BASE_URL` | 否 | `https://api.siliconflow.cn/v1` | 服务端点 |
+| `LLM_MODERATION_TEXT_MODEL` | 否 | `Qwen/Qwen2.5-7B-Instruct` | 文本审核模型 |
+| `LLM_MODERATION_IMAGE_MODEL` | 否 | `Qwen/Qwen3-VL-8B-Instruct` | 图片审核模型（需视觉能力） |
+| `LLM_MODERATION_TIMEOUT_MS` | 否 | `15000` | 单次调用超时（毫秒） |
+
+### 3. 服务侧配置
+
+1. 在 [SiliconFlow 控制台](https://cloud.siliconflow.cn/) 创建 API Key，或切换到任意 OpenAI 兼容服务端点。
+2. 所选模型需支持 `response_format: { type: 'json_object' }`。
+3. 图片模型需为视觉模型。
+4. 阿里云绿网侧仍需正常配置，因为 `ModerationService` 先走阿里云再走 LLM。
+
+### 4. 关键文件
+
+| 路径 | 说明 |
+|---|---|
+| `src/moderation/llm-moderation.service.ts` | LLM 审核核心服务 |
+| `src/moderation/moderation.service.ts` | 组合阿里云 + LLM 审核 |
+| `src/moderation/moderation.config.ts` | 阿里云审核阈值与拦截标签配置 |
+| `src/moderation/moderation.types.ts` | 结果类型定义 |
+| `src/posts/posts.service.ts` | 发帖文本审核调用点 |
+| `src/file-processor/file-processor.service.ts` | 图片上传审核调用点 |
+
+### 5. 提示词与返回格式
+
+**文本审核**
+
+系统提示词要求模型只输出 JSON：
+
+```json
+{"passed": true/false, "reason": "原因（中文）", "labels": ["违规标签"]}
+```
+
+**图片审核**
+
+用户消息包含文字指令 + `image_url`，输出格式同文本。
+
+**调用参数**
+
+```json
+{
+  "model": "...",
+  "messages": [...],
+  "temperature": 0,
+  "max_tokens": 256,
+  "response_format": { "type": "json_object" }
+}
+```
+
+### 6. 特殊行为与兜底
+
+- **异常默认放行**：网络、超时、解析失败、服务不可用均视为 `passed: true`，不会阻塞业务。
+- **未启用时放行**：缺少 API key 或 `LLM_MODERATION_ENABLED=false` 直接返回 `{ passed: true }`。
+- **空内容放行**：空字符串文本不调用模型。
+- **超大图跳过**：图片超过 2MB 时跳过 LLM 审核（控制成本）。
+- **标签合并**：若阿里云与 LLM 都放行但存在低置信度标签，`ModerationService.combineResults()` 合并去重，仍放行但保留记录。
+- **LLM 拦截信息**：`labels` 置信度固定为 `100`，`reason` 使用模型返回的中文原因。
+
+---
+
+## 附录 H: 阿里云短信认证服务
+
+手机号登录/注册/换绑使用阿里云「号码认证服务 - 短信认证」（产品 `Dypnsapi`，接口 `SendSmsVerifyCode` / `CheckSmsVerifyCode`），而非独立短信服务（`Dysmsapi` / `SendSms`）。
+
+### 1. 与短信服务（Dysmsapi）的区别
+
+| 维度 | 短信认证服务（Dypnsapi） | 短信服务（Dysmsapi） |
+|---|---|---|
+| 产品入口 | [号码认证服务控制台](https://dypns.console.aliyun.com/) | [短信服务控制台](https://dysms.console.aliyun.com/) |
+| 下发接口 | `SendSmsVerifyCode` | `SendSms` |
+| 验证码生成 | 阿里云自动生成 | 业务侧生成 |
+| 验证码存储/校验 | 阿里云负责 | 业务侧存储到 Redis 后自行校验 |
+| 签名/模板 | 可使用系统赠送签名/模板，无需审核 | 必须自行申请签名和模板并审核 |
+| 适用场景 | 手机号验证、登录 | 营销/通知/自定义模板短信 |
+
+### 2. 环境变量
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `ALIBABA_CLOUD_ACCESS_KEY_ID` | 是 | 阿里云 RAM 子账号 AccessKey ID |
+| `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | 是 | 阿里云 RAM 子账号 AccessKey Secret |
+| `SMS_SIGN_NAME` | 是 | 短信签名；也可使用号码认证服务赠送签名 |
+| `SMS_TEMPLATE_CODE` | 是 | 通用模板 CODE；未配置场景模板时回退使用 |
+| `SMS_TEMPLATE_CODE_REGISTER` | 否 | 注册场景模板 CODE |
+| `SMS_TEMPLATE_CODE_LOGIN` | 否 | 登录场景模板 CODE |
+| `SMS_TEMPLATE_CODE_BIND` | 否 | 换绑场景模板 CODE |
+| `SMS_ENDPOINT` | 否 | 默认 `dypnsapi.aliyuncs.com` |
+| `SMS_VALID_TIME_S` | 否 | 验证码有效期（秒），默认 600 |
+| `SMS_CODE_LENGTH` | 否 | 验证码位数，默认 6 |
+
+### 3. 阿里云控制台配置
+
+1. 进入 [号码认证服务控制台](https://dypns.console.aliyun.com/)。
+2. 开通「短信认证」能力。
+3. 在「短信认证参数配置」页面查看：
+   - **赠送签名**：系统预置，可直接使用。
+   - **赠送模板**：系统提供 5 个固定模板，CODE 分别为 `100001`（登录/注册）、`100002`（修改绑定手机号）、`100003`（重置密码）、`100004`（绑定新手机号）、`100005`（验证绑定手机号）。
+4. 把赠送签名名称填入 `SMS_SIGN_NAME`，把对应模板 CODE 填入 `SMS_TEMPLATE_CODE_*`。
+5. 为 RAM 子账号授权 `AliyunDypnsFullAccess`。
+
+> 系统赠送签名必须搭配系统赠送模板使用；自定义签名/模板需要单独申请资质并审核。
+
+### 4. 关键文件
+
+| 路径 | 说明 |
+|---|---|
+| `src/user/sms/aliyun-sms.sender.ts` | 阿里云短信认证发送/校验实现 |
+| `src/user/sms/mock-sms.sender.ts` | 本地 Mock 实现（开发/测试） |
+| `src/user/sms/sms.service.ts` | 业务层频率限制 + 错误码映射 |
+| `src/user/user.module.ts` | `SMS_SENDER` 注入配置 |
+
+### 5. 模板变量
+
+调用 `SendSmsVerifyCode` 时，`templateParam` 固定传：
+
+```json
+{"code":"##code##"}
+```
+
+阿里云会自动把 `##code##` 替换为真实验证码。业务侧不再自己生成验证码。
+
+### 6. 校验说明
+
+`CheckSmsVerifyCode` 返回 `model.verifyResult`：
+
+- `PASS`：校验通过。
+- `UNKNOWN`：校验失败（验证码错误、过期、次数超限等）。
+
+业务侧统一映射为 `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED`。
+
+### 7. 开发/测试
+
+若不想对接阿里云或暂无套餐包，可把 `src/user/user.module.ts` 中的 `SMS_SENDER` 改为 `MockSmsAuthSender`：
+
+```ts
+{
+  provide: SMS_SENDER,
+  useClass: MockSmsAuthSender,
+}
+```
+
+验证码会打印在日志中，并存储在 Redis `sms:code:mock:{phone}:{scene}` 里。
+
+---
+
 ## 环境变量
 
 | 变量 | 说明 |
@@ -1717,8 +2209,31 @@ payload 示例：
 | `TEST_MODEL` | 仅控制「`unbound` 后再 login / binding/create」冷却：`true` 关闭 / `false` 开启。**不影响主设备保护、本机解绑 2 小时等待、切号锁** |
 | `DB_HOST/PORT/NAME/USERNAME/PASSWORD` | MySQL 连接 |
 | `REDIS_HOST/PORT/PASSWORD` | Redis 连接 |
-| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile |
+| `TURNSTILE_SECRET_KEY` | Cloudflare Turnstile（v1 `register` 用） |
+| `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | 阿里云 AK/SK（内容审核与验证码 2.0 共用；RAM 子账号需授予对应权限） |
+| `CAPTCHA_SCENE_ID` | 阿里云验证码 2.0 场景 ID（控制台「无痕验证」场景；`registerV2` 必填） |
+| `CAPTCHA_ENDPOINT` | 可选，默认 `captcha.cn-shanghai.aliyuncs.com`（中国内地） |
+| `SMS_SIGN_NAME` | 阿里云短信签名（手机号登录/注册/换绑用） |
+| `SMS_TEMPLATE_CODE` | 通用短信模板 CODE；未配置场景模板时回退使用 |
+| `SMS_TEMPLATE_CODE_REGISTER` | 可选，注册场景模板 CODE |
+| `SMS_TEMPLATE_CODE_LOGIN` | 可选，登录场景模板 CODE |
+| `SMS_TEMPLATE_CODE_BIND` | 可选，换绑场景模板 CODE |
+| `SMS_ENDPOINT` | 可选，默认 `dypnsapi.aliyuncs.com` |
+| `SMS_VALID_TIME_S` | 验证码有效期（秒），默认 600 |
+| `SMS_CODE_LENGTH` | 验证码位数，默认 6 |
 | `DEVICE_SECRET_HASH_KEY` | bcrypt pepper，用于 `device_secret` 加盐哈希 |
+| `SILICONFLOW_API_KEY` | 硅基流动 API key（发帖 AI 自动分类用）；**不配置则跳过 AI 分类**，发帖默认「默认」 |
+| `SILICONFLOW_BASE_URL` | 可选，默认 `https://api.siliconflow.cn/v1` |
+| `SILICONFLOW_MODEL` | 可选，默认 `Qwen/Qwen2.5-VL-7B-Instruct`（支持识图，~0.15 元/百万 token 输入） |
+| `AI_CLASSIFY_MAX_IMAGES` | 可选，发视觉模型的图片数上限，默认 4（控制成本） |
+| `LLM_MODERATION_ENABLED` | 是否启用 LLM 二次审核，默认 `true`（依赖 key 存在才启用）；显式 `false` 关闭 |
+| `LLM_MODERATION_API_KEY` | LLM 审核 API key，默认复用 `SILICONFLOW_API_KEY` |
+| `LLM_MODERATION_BASE_URL` | 可选，默认 `https://api.siliconflow.cn/v1` |
+| `LLM_MODERATION_TEXT_MODEL` | 文本审核模型，默认 `Qwen/Qwen2.5-7B-Instruct` |
+| `LLM_MODERATION_IMAGE_MODEL` | 图片审核模型，默认 `Qwen/Qwen3-VL-8B-Instruct` |
+| `LLM_MODERATION_TIMEOUT_MS` | LLM 审核超时（毫秒），默认 `15000` |
+| `LOG_DIR` | 日志文件目录，默认 `/var/www/logs` |
+| `LOG_FILE` | 日志文件名，默认 `treehole-nest.log` |
 
 `.env` 示例（测试）：
 
@@ -1787,6 +2302,21 @@ ALTER TABLE posts
 -- 见 database/migrations/20260816_backfill_posts_model.sql
 -- 规则：有图片→梗图；其余按内容语义判定 问答/资料/兴趣；未判定保持「默认」。
 -- 执行后同样需重建 ES 索引（syncES），否则 ES 里的 category 为旧值。
+
+-- 「梗图」重分类（历史回填时"有图一律梗图"过粗，部分实为教程/提问截图）：
+-- 见 scripts/reclassify_meme.py：只读客户端，用硅基流动 Qwen3-VL 逐条识图判定，
+-- 输出变更结果与可手动执行的 UPDATE SQL（不写库）。改完 MySQL 后需重建 ES 索引
+-- （syncES）同步 category。用法：sudo python3 scripts/reclassify_meme.py [--limit N]
+
+-- 手机号登录（新增 phone 字段、取消 fingerprint_hash 全局唯一索引）
+-- 见 design-phone-login.md
+ALTER TABLE users
+  ADD COLUMN phone VARCHAR(20) NULL AFTER user_display_id,
+  ADD UNIQUE KEY uk_users_phone (phone);
+
+ALTER TABLE fingerprints DROP INDEX uk_fingerprints_hash;
+-- 可选，提升按指纹查询性能：
+-- ALTER TABLE fingerprints ADD INDEX idx_fingerprints_hash (fingerprint_hash);
 ```
 
 历史迁移示例：
@@ -1809,5 +2339,7 @@ ALTER TABLE devices DROP COLUMN IF EXISTS unique_token;
 ```bash
 npm install
 npm run start:dev    # 默认监听 7300
-npm test             # 单元测试
+npm run build        # 生产编译
 ```
+
+> 当前仓库已移除原有损坏的 `*.spec.ts` 文件，`npm test` 暂无可用用例。后续补充测试时建议从 `src/user/sms/*`、`src/user/user.service.login.ts` 等核心模块开始。
