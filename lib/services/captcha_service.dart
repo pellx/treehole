@@ -23,6 +23,12 @@ import '../config/local.dart';
 class CaptchaPage {
   CaptchaPage._();
 
+  /// 托管验证页（与 [buildHtml] 内容一致，部署在站点 webroot
+  /// /var/www/treehole/captcha.html）。官方 App 接入文档的做法即 WebView
+  /// 加载托管页面：真实 origin/cookie/referrer 环境对风控更友好；
+  /// 托管页加载失败时回退到内联 HTML。修改页面内容时两处需同步。
+  static final Uri pageUri = Uri.parse('$kPowApiBase/captcha.html');
+
   /// 构建验证码页面 HTML（prefix/region/sceneId 由 local.dart 注入）。
   ///
   /// 嵌入式（mode: 'embed'）渲染在 element 上：一点即过场景展示「确认您

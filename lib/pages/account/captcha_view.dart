@@ -33,6 +33,7 @@ class _CaptchaViewState extends State<CaptchaView> {
   WebViewController? _controller;
   String? _error;
   bool _loaded = false;
+  bool _useHostedPage = true;
 
   @override
   void initState() {
@@ -40,7 +41,9 @@ class _CaptchaViewState extends State<CaptchaView> {
     _loadPage();
   }
 
-  /// （重）加载验证码页面。整页重载同时重置 SDK 初始化状态。
+  /// （重）加载验证码页面。优先加载站点托管页（真实 origin/cookie 环境，
+  /// 官方 App 接入文档做法）；托管页主框架加载失败时回退到内联 HTML
+  /// （内容一致）。整页重载同时重置 SDK 初始化状态。
   void _loadPage() {
     setState(() {
       _error = null;
@@ -57,11 +60,24 @@ class _CaptchaViewState extends State<CaptchaView> {
           setState(() => _loaded = true);
           controller.runJavaScript('window.__renderCaptcha()');
         },
-        onWebResourceError: (err) =>
-            debugPrint('[CaptchaView] Resource error: '
-                '${err.errorType} — ${err.description}'),
-      ))
-      ..loadHtmlString(CaptchaPage.buildHtml(), baseUrl: kPowApiBase);
+        onWebResourceError: (err) {
+          debugPrint('[CaptchaView] Resource error: '
+              '${err.errorType} — ${err.description}');
+          if (err.isForMainFrame == true && _useHostedPage && mounted) {
+            setState(() => _useHostedPage = false);
+            _loadPage();
+          }
+        },
+      ));
+    if (_useHostedPage) {
+      // 官方建议验证码页面禁用缓存，确保可及时获取最新验证码
+      controller.loadRequest(
+        CaptchaPage.pageUri,
+        headers: const {'Cache-Control': 'no-cache'},
+      );
+    } else {
+      controller.loadHtmlString(CaptchaPage.buildHtml(), baseUrl: kPowApiBase);
+    }
     setState(() => _controller = controller);
   }
 
