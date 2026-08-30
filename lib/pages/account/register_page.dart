@@ -542,19 +542,6 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                 ),
               )
-            else if (_phase == 'registering')
-              _offsetLayer(
-                vOffset: RegisterDimens.captchaVOffset,
-                hOffset: RegisterDimens.captchaHOffset,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: RegisterDimens.captchaHPadding),
-                  child: CaptchaView(
-                    height: RegisterDimens.captchaHeight,
-                    onVerified: _onCaptchaVerified,
-                  ),
-                ),
-              )
             else if (_phase == 'naming')
               _offsetLayer(
                 vOffset: RegisterDimens.namingInputVOffset,
@@ -583,6 +570,29 @@ class _RegisterPageState extends State<RegisterPage> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: RegisterDimens.contentHPadding),
                   child: _buildPhase(colors, onSurface),
+                ),
+              ),
+            // 验证码 WebView：注册流程开始即隐藏挂载（WebView 需在树上
+            // 才跑 JS），SDK 提前完成渲染；registering 阶段原地显示，
+            // 无等待感。透明区域同时预留拼图/滑块挑战面板的展开空间
+            if (!widget.startAtLogin &&
+                (_phase == 'checking' ||
+                    _phase == 'unregistered' ||
+                    _phase == 'registering'))
+              _offsetLayer(
+                vOffset: RegisterDimens.captchaVOffset,
+                hOffset: RegisterDimens.captchaHOffset,
+                ignorePointer: _phase != 'registering',
+                child: Opacity(
+                  opacity: _phase == 'registering' ? 1 : 0,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: RegisterDimens.captchaHPadding),
+                    child: CaptchaView(
+                      height: RegisterDimens.captchaHeight,
+                      onVerified: _onCaptchaVerified,
+                    ),
+                  ),
                 ),
               ),
             // 登录 — 找回用户（账户切换进入的登录不显示）

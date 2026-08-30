@@ -95,10 +95,14 @@ class RegisterDimens {
   static const double stepDefaultAlpha = 0.6;
   static const double stepErrorGap = 16; // 步骤区和错误信息间距
 
-  // ── 验证码嵌入视图（registering 阶段；一点即过条高约 40，滑块挑战略高）──
-  static const double captchaVOffset = 30;
+  // ── 验证码嵌入视图（registering 阶段显示；此前隐藏预渲染）──
+  // 高度 320：拼图/滑块二次挑战面板会在验证条下方展开，需预留空间；
+  // 一点即过形态仅条高约 40，多余部分透明不可见。
+  // VOffset 154 使 320 高视图的顶部与原 72 高视图一致（中心-6），
+  // 验证条视觉位置不变
+  static const double captchaVOffset = 154;
   static const double captchaHOffset = 0;
-  static const double captchaHeight = 72;
+  static const double captchaHeight = 320;
   /// 验证条 SDK 固定 320 宽，内边距须保证容器 ≥ 320（屏宽 - 2×20）
   static const double captchaHPadding = 20;
 

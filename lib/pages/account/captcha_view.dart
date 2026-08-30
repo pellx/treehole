@@ -32,7 +32,6 @@ class CaptchaView extends StatefulWidget {
 class _CaptchaViewState extends State<CaptchaView> {
   WebViewController? _controller;
   String? _error;
-  bool _loaded = false;
   bool _useHostedPage = true;
 
   @override
@@ -45,10 +44,7 @@ class _CaptchaViewState extends State<CaptchaView> {
   /// 官方 App 接入文档做法）；托管页主框架加载失败时回退到内联 HTML
   /// （内容一致）。整页重载同时重置 SDK 初始化状态。
   void _loadPage() {
-    setState(() {
-      _error = null;
-      _loaded = false;
-    });
+    setState(() => _error = null);
     final controller = WebViewController();
     controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -74,7 +70,6 @@ class _CaptchaViewState extends State<CaptchaView> {
             return;
           }
           if (!mounted) return;
-          setState(() => _loaded = true);
           try {
             await controller.runJavaScript('window.__renderCaptcha()');
           } catch (e) {
@@ -118,32 +113,16 @@ class _CaptchaViewState extends State<CaptchaView> {
 
   @override
   Widget build(BuildContext context) {
+    // 无加载指示：页面背景透明，SDK 渲染完成前自然为空白，
+    // 避免加载图标在「通过一些测试」阶段闪现
     return SizedBox(
       height: widget.height,
       width: double.infinity,
       child: _error != null
           ? _buildError(context)
           : _controller == null
-              ? const Center(
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : Stack(
-                  children: [
-                    WebViewWidget(controller: _controller!),
-                    if (!_loaded)
-                      const Center(
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      ),
-                  ],
-                ),
+              ? const SizedBox.shrink()
+              : WebViewWidget(controller: _controller!),
     );
   }
 
