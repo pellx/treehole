@@ -4,12 +4,6 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    document.addEventListener('securitypolicyviolation', function(e) {
-      var o = document.getElementById('errlog');
-      if (o) { o.style.display = 'block'; o.textContent += '[CSP] ' + e.violatedDirective + ' blocked ' + (e.blockedURL || '') + '\n'; }
-    });
-  </script>
-  <script>
     window.AliyunCaptchaConfig = {
       region: "cn",
       prefix: "cixk1p"
@@ -19,20 +13,13 @@
   <style>
     body { margin: 0; padding: 0; background: transparent; }
     #captcha-element { width: 100%; }
-    #errlog { display: none; font: 11px monospace; color: #900; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <div id="captcha-element"></div>
   <button id="captcha-button" style="display:none"></button>
-  <pre id="errlog"></pre>
   <script>
     function __post(status, token, message) {
-      var o = document.getElementById('errlog');
-      if (o && (status === 'error' || location.search.indexOf('debug=1') >= 0)) {
-        o.style.display = 'block';
-        o.textContent += '[post] ' + status + ' ' + (message || '') + ' token=' + (token ? token.slice(0, 50) + '...' : 'null') + '\n';
-      }
       if (window.CaptchaChannel && CaptchaChannel.postMessage) {
         CaptchaChannel.postMessage(JSON.stringify({status: status, token: token, message: message}));
       }
@@ -106,16 +93,13 @@
       }
     };
 
-    window.onerror = function(msg, src, line) {
-      __post('error', null, 'jserror ' + msg + ' @' + String(src || '').slice(0, 80) + ':' + line);
-    };
-
+    // 浏览器自测：https://tree.leisure.xin/captcha.html?render=1（无可见输出）
     if (location.search.indexOf('render=1') >= 0) {
       var n = 0;
       var iv = setInterval(function() {
         n++;
         if (typeof initAliyunCaptcha !== 'undefined') { clearInterval(iv); window.__renderCaptcha(); }
-        else if (n > 40) { clearInterval(iv); __post('error', null, 'SDK load timeout'); }
+        else if (n > 40) { clearInterval(iv); }
       }, 500);
     }
   </script>
