@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+    document.addEventListener('securitypolicyviolation', function(e) {
+      var o = document.getElementById('errlog');
+      if (o) { o.style.display = 'block'; o.textContent += '[CSP] ' + e.violatedDirective + ' blocked ' + (e.blockedURL || '') + '\n'; }
+    });
+  </script>
+  <script>
+    window.AliyunCaptchaConfig = {
+      region: "cn",
+      prefix: "cixk1p"
+    };
+  </script>
+  <script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
+  <style>
+    body { margin: 0; padding: 0; background: transparent; }
+    #captcha-element { width: 100%; }
+    #errlog { display: none; font: 11px monospace; color: #900; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="captcha-element"></div>
+  <button id="captcha-button" style="display:none"></button>
+  <pre id="errlog"></pre>
+  <script>
+    function __post(status, token, message) {
+      var o = document.getElementById('errlog');
+      if (o && (status === 'error' || location.search.indexOf('debug=1') >= 0)) {
+        o.style.display = 'block';
+        o.textContent += '[post] ' + status + ' ' + (message || '') + ' token=' + (token ? token.slice(0, 50) + '...' : 'null') + '\n';
+      }
+      if (window.CaptchaChannel && CaptchaChannel.postMessage) {
+        CaptchaChannel.postMessage(JSON.stringify({status: status, token: token, message: message}));
+      }
+    }
+
+    window.__renderCaptcha = function() {
+      function doRender() {
+        if (typeof initAliyunCaptcha === 'undefined') return;
+        try {
+          initAliyunCaptcha({
+            SceneId: "1wr9kzfo",
+            mode: 'embed',
+            element: '#captcha-element',
+            button: '#captcha-button',
+            language: 'cn',
+            slideStyle: { width: 320, height: 40 },
+            immediate: true,
+            captchaVerifyCallback: function(param, callback) {
+              function done() {
+                if (typeof callback === 'function') {
+                  callback({captchaResult: true});
+                }
+              }
+              var obj;
+              try {
+                obj = (typeof param === 'string') ? JSON.parse(param) : param;
+              } catch (e) {
+                obj = null;
+              }
+              obj = obj || {};
+              if (obj.err && obj.err.code) {
+                __post('error', null, 'INIT_FAIL ' + obj.err.code + ': ' + String(obj.err.msg || '').slice(0, 300));
+                return done();
+              }
+              if (obj.failover === 'T') {
+                __post('error', null, 'FAILOVER: 验证码服务降级');
+                return done();
+              }
+              if (!obj.certifyId || String(obj.certifyId).length < 8) {
+                __post('error', null, 'BAD_PARAM: ' + String(param).slice(0, 200));
+                return done();
+              }
+              __post('success', (typeof param === 'string') ? param : JSON.stringify(param), null);
+              return done();
+            },
+            onBizResultCallback: function(res) {},
+            getInstance: function(instance) {},
+            onError: function(err) {
+              __post('error', null, 'onError: ' + JSON.stringify(err).slice(0, 300));
+            }
+          });
+        } catch (e) {
+          __post('error', null, 'render failed: ' + e.message);
+        }
+      }
+
+      if (typeof initAliyunCaptcha !== 'undefined') {
+        doRender();
+      } else {
+        var attempts = 0;
+        var interval = setInterval(function() {
+          attempts++;
+          if (typeof initAliyunCaptcha !== 'undefined') {
+            clearInterval(interval);
+            doRender();
+          } else if (attempts >= 90) {
+            clearInterval(interval);
+            __post('error', null, 'AliyunCaptcha script load timeout (45s)');
+          }
+        }, 500);
+      }
+    };
+
+    window.onerror = function(msg, src, line) {
+      __post('error', null, 'jserror ' + msg + ' @' + String(src || '').slice(0, 80) + ':' + line);
+    };
+
+    if (location.search.indexOf('render=1') >= 0) {
+      var n = 0;
+      var iv = setInterval(function() {
+        n++;
+        if (typeof initAliyunCaptcha !== 'undefined') { clearInterval(iv); window.__renderCaptcha(); }
+        else if (n > 40) { clearInterval(iv); __post('error', null, 'SDK load timeout'); }
+      }, 500);
+    }
+  </script>
+</body>
+</html>
