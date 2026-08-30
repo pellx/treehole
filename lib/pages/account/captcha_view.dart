@@ -2,27 +2,34 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../config/local.dart';
+import '../../services/api.dart';
 import '../../services/captcha_service.dart';
 
-/// 阿里云验证码（一点即过/滑块）内嵌视图。
+/// 阿里云验证码（一点即过/滑块/拼图）内嵌视图。
 ///
 /// 嵌在注册页「通过一些测试」阶段的页面元素流上，与图片/文字共用同一套
 /// 中心偏移定位。WebView 背景透明（控制器背景 + HTML body 均透明，
 /// Android 默认 TLHC 渲染支持透明合成），页面上只露出验证控件本身。
-/// 用户完成真实点击验证后经 [onVerified] 回传 captchaVerifyParam；
-/// 失败时在原位展示原因（服务端已映射为带错误码的中文），可重试——
+/// 用户完成真实交互后经 [verifyHandler] 即时调服务端二次校验
+/// （VerifyIntelligentCaptcha），通过拿到 Redis 凭证后经 [onVerified]
+/// 回传；失败在原位展示原因（服务端已映射为带错误码的中文），可重试——
 /// 整页重载以规避 SDK「只能初始化一次」。
 class CaptchaView extends StatefulWidget {
-  /// 验证通过回调，参数为 captchaVerifyParam（须立即提交业务请求）
+  /// 即时校验：验证码脚本回调的 captchaVerifyParam 原样提交服务端，
+  /// 返回 Redis 凭证 ticket；失败返回 null（ApiService.lastError 有原因）
+  final Future<String?> Function(String captchaVerifyParam) verifyHandler;
+
+  /// 校验通过回调，参数为服务端签发的凭证 ticket
   final ValueChanged<String> onVerified;
 
-  /// 视图高度：容纳一点即过验证条；升级挑战（滑块）时亦够用
+  /// 视图高度：需容纳挑战面板（拼图/滑块）在验证条下方展开
   final double height;
 
   const CaptchaView({
     super.key,
+    required this.verifyHandler,
     required this.onVerified,
-    this.height = 64,
+    this.height = 320,
   });
 
   @override
@@ -33,6 +40,7 @@ class _CaptchaViewState extends State<CaptchaView> {
   WebViewController? _controller;
   String? _error;
   bool _useHostedPage = true;
+  bool _verifying = false;
 
   @override
   void initState() {
@@ -97,12 +105,22 @@ class _CaptchaViewState extends State<CaptchaView> {
     setState(() => _controller = controller);
   }
 
-  void _onMessage(JavaScriptMessage msg) {
+  Future<void> _onMessage(JavaScriptMessage msg) async {
     final parsed = CaptchaPage.parse(msg.message);
     if (!mounted) return;
     if (parsed.status == 'success' && parsed.token != null) {
-      debugPrint('[CaptchaView] 验证通过 token len=${parsed.token!.length}');
-      widget.onVerified(parsed.token!);
+      if (_verifying) return; // SDK 重复回调防护
+      _verifying = true;
+      debugPrint(
+          '[CaptchaView] 验证通过，即时二次校验中 token len=${parsed.token!.length}');
+      final ticket = await widget.verifyHandler(parsed.token!);
+      if (!mounted) return;
+      _verifying = false;
+      if (ticket != null) {
+        widget.onVerified(ticket);
+        return;
+      }
+      setState(() => _error = ApiService.lastError ?? '验证失败，请重试');
       return;
     }
     if (parsed.message != null) {

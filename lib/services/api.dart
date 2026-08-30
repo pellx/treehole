@@ -878,26 +878,65 @@ class ApiService {
     }
   }
 
+  /// 通过测试页即时校验验证码：服务端调阿里云 verify，通过后签发
+  /// Redis 凭证（10 分钟有效，注册失败可复用，注册成功后销毁），
+  /// 返回 captcha_ticket；失败返回 null 并设置 lastError
+  static Future<String?> verifyCaptcha(String captchaVerifyParam) async {
+    try {
+      final res = await _client
+          .post(
+            Uri.parse('$_userBase/captcha/verify'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'captcha_verify_param': captchaVerifyParam}),
+          )
+          .timeout(_timeout);
+      if (_isHttpSuccess(res.statusCode)) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final ticket = data['captcha_ticket'] as String?;
+        if (ticket != null) return ticket;
+        lastError = '响应缺少字段';
+        debugPrint('[ApiService] captcha/verify missing ticket');
+        return null;
+      }
+      lastError = _parseErrorMessage(res.body);
+      debugPrint(
+        '[ApiService] captcha/verify status=${res.statusCode} body=${res.body}',
+      );
+      return null;
+    } catch (e) {
+      lastError =
+          e is TimeoutException ? '服务器响应超时，请重试' : '网络连接失败';
+      debugPrint('[ApiService] captcha/verify error: $e');
+      return null;
+    }
+  }
+
   /// POST /user/registerV2 — 为新设备创建用户，返回 user_token + device_secret
   /// 验证码改为阿里云验证码 2.0（后端 VerifyIntelligentCaptcha）
+  /// [captchaTicket] 优先：即时校验通过的 Redis 凭证；为空时回退直传
+  /// [verificationCaptcha]（captchaVerifyParam）
   static Future<RegisterResult?> registerV2({
     required String userDisplayId,
     required DeviceFingerprint deviceFingerPrint,
-    required String verificationCaptcha,
+    String? verificationCaptcha,
+    String? captchaTicket,
     required PoWResult verificationPow,
   }) async {
     try {
       final requestBody = {
         'user_display_id': userDisplayId,
         'device_finger_print': deviceFingerPrint.toJson(),
-        'verification_captcha': verificationCaptcha,
+        if (captchaTicket != null)
+          'verification_captcha_ticket': captchaTicket
+        else
+          'verification_captcha': verificationCaptcha,
         'verification_pow': {
           'challenge_id': verificationPow.challengeId,
           'nonce': verificationPow.nonce,
         },
       };
       debugPrint('[ApiService] registerV2 提交 name=$userDisplayId '
-          'captcha(len=${verificationCaptcha.length}) '
+          'captchaTicket=$captchaTicket captcha(len=${verificationCaptcha?.length}) '
           'pow=${verificationPow.challengeId}/nonce=${verificationPow.nonce}');
       final res = await _client
           .post(

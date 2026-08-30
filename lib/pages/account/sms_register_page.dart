@@ -585,6 +585,9 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
         const SizedBox(height: RegisterDimens.smsCaptchaTipGap),
         CaptchaView(
           height: RegisterDimens.captchaHeight,
+          // SMS 注册服务端直接校验 captchaVerifyParam，无需 Redis 凭证，
+          // 校验处理器原样回传参数
+          verifyHandler: (param) async => param,
           onVerified: _onCaptchaVerified,
         ),
         if (_error != null) ...[

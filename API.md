@@ -215,7 +215,8 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 {
   "user_display_id": "昵称（1-100字符）",
   "device_finger_print": { "platform": "android", "android": {...} },
-  "verification_captcha": "阿里云验证码 captchaVerifyParam（客户端原样透传）",
+  "verification_captcha_ticket": "captcha/verify 签发的凭证（推荐，与 verification_captcha 二选一）",
+  "verification_captcha": "阿里云验证码 captchaVerifyParam（客户端原样透传；无凭证时的兼容方式）",
   "verification_pow": {
     "challenge_id": "来自 pow-challenge",
     "nonce": 123456
@@ -246,9 +247,44 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 400 | `验证码服务未配置`（服务端缺 `CAPTCHA_SCENE_ID` / AK） |
 | 400 | `PoW 验证失败` |
 
-与 v1 的差异：`captchaVerifyParam` 为**一次性**（复用/过期返回 F008、约 20 分钟过期），服务端**不做 Redis 缓存复用**；注册失败后客户端须重新 `getToken()` 再试。
+与 v1 的差异：`captchaVerifyParam` 为**一次性**（复用/过期返回 F008、约 20 分钟过期）。
+
+**推荐流程（凭证模式）**：客户端在「通过测试」页完成验证后立即调 [3c. POST /user/captcha/verify](#3c-post-usercaptchaverify) 即时校验，拿 `captcha_ticket` 凭证再提交本接口。凭证 10 分钟有效，**注册失败可复用**（如改名重试），**仅注册成功后销毁**；过期返回 `验证码已使用或过期，请重新验证`，客户端须重新完成验证。直传 `verification_captcha` 为旧客户端兼容路径，失败后须重新取 token。
 
 成功后的落库与 v1 相同（users / devices / fingerprints / 两个 history，**不写** `user_device_binding`，须再 `/user/login` 或 `/user/binding/create` 建绑）。
+
+---
+
+### 3c. POST /user/captcha/verify
+
+即时校验阿里云验证码（供「通过测试」页在用户完成交互后立即调用），通过后签发 Redis 凭证供 `registerV2` 使用。使风控结论（F001 等）当场可见，注册时刻无需再调阿里云。
+
+**请求**
+
+```json
+{
+  "captcha_verify_param": "验证码脚本回调的 captchaVerifyParam，原样透传"
+}
+```
+
+**响应** `200`
+
+```json
+{
+  "captcha_ticket": "uuid（10 分钟有效）"
+}
+```
+
+**错误** `400`：即附录 F 的 verifyCode 映射文案（如 `风险校验未通过，请稍后再试(F001)`）、`验证码服务异常，请重试`。
+
+**行为**
+
+- 凭证键 `captcha:ticket:<uuid>`，TTL 600 秒；
+- `registerV2` 校验凭证存在即放行，**仅注册成功后销毁**——注册失败（昵称占用等）改名可直接重试；
+- 旧客户端仍可直传 `verification_captcha`（服务端即时调阿里云校验）。
+
+---
+
 
 ---
 

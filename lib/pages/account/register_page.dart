@@ -45,8 +45,9 @@ class _RegisterPageState extends State<RegisterPage> {
   PoWChallenge? _prePowChallenge;
   bool _powFetching = false;
 
-  // 「通过一些测试」阶段由用户完成阿里云点击验证后持有，提交时使用
-  String? _captchaToken;
+  // 「通过一些测试」阶段即时二次校验通过后由服务端签发的 Redis 凭证
+  // （10 分钟有效，注册失败可复用，注册成功后服务端销毁）
+  String? _captchaTicket;
 
   @override
   void initState() {
@@ -213,11 +214,12 @@ class _RegisterPageState extends State<RegisterPage> {
     });
   }
 
-  /// 验证通过（用户在「通过一些测试」阶段真实点击完成）→ 进入取名
-  void _onCaptchaVerified(String token) {
+  /// 即时校验通过（用户在「通过一些测试」阶段真实点击，服务端已签发
+  /// Redis 凭证）→ 进入取名
+  void _onCaptchaVerified(String ticket) {
     if (!mounted) return;
     setState(() {
-      _captchaToken = token;
+      _captchaTicket = ticket;
       _phase = 'naming';
     });
   }
@@ -228,7 +230,7 @@ class _RegisterPageState extends State<RegisterPage> {
     _tokenController.clear();
     _prePowNonce = null;
     _prePowChallenge = null;
-    _captchaToken = null;
+    _captchaTicket = null;
     setState(() {
       _phase = 'checking';
       _error = null;
@@ -287,11 +289,11 @@ class _RegisterPageState extends State<RegisterPage> {
         _prePowNonce = nonce;
       }
 
-      // 验证码在「通过一些测试」阶段由用户真实点击完成（官方明确 App 内
-      // 自动触发无痕验证会被风控拒绝）。token 一次性：提交失败后清空，
-      // 再次确认时自动回到验证阶段重新获取
-      final captchaToken = _captchaToken;
-      if (captchaToken == null) {
+      // 验证码在「通过一些测试」阶段即时二次校验通过并已换取 Redis
+      // 凭证（风控 F001 等结论当场可见）；凭证 10 分钟有效，注册失败
+      // 可复用，过期后重新确认时自动回到验证阶段重新获取
+      final captchaTicket = _captchaTicket;
+      if (captchaTicket == null) {
         setState(() => _phase = 'registering');
         return;
       }
@@ -299,7 +301,7 @@ class _RegisterPageState extends State<RegisterPage> {
       final result = await ApiService.registerV2(
         userDisplayId: name,
         deviceFingerPrint: fp,
-        verificationCaptcha: captchaToken,
+        captchaTicket: captchaTicket,
         verificationPow: PoWResult(
           challengeId: _prePowChallenge!.challengeId,
           nonce: _prePowNonce!,
@@ -309,15 +311,18 @@ class _RegisterPageState extends State<RegisterPage> {
       if (!mounted) return;
 
       if (result == null) {
-        // PoW 校验不消费 challenge；仅过期被拒（TTL 约 3 分钟）时重取。
-        // 验证码 param 一次性：任何到达服务端的尝试都会消费它，必须清空，
-        // 再次确认时回到验证阶段重新获取（复用报 F008）
-        _captchaToken = null;
-        if (ApiService.lastError == 'PoW 验证失败') {
+        final err = ApiService.lastError ?? '';
+        // PoW 校验不消费 challenge；仅过期被拒（TTL 约 3 分钟）时重取
+        if (err == 'PoW 验证失败') {
           _prePowChallenge = null;
           _prePowNonce = null;
         }
-        setState(() => _renameError = _mapRegisterError(ApiService.lastError));
+        // 验证凭证过期（10 分钟）才清空回到验证阶段；其余失败（如昵称
+        // 占用）保留凭证，改名后可直接重试，无需再次完成验证
+        if (err.contains('验证码已使用或过期')) {
+          _captchaTicket = null;
+        }
+        setState(() => _renameError = _mapRegisterError(err));
         return;
       }
 
@@ -590,6 +595,7 @@ class _RegisterPageState extends State<RegisterPage> {
                         horizontal: RegisterDimens.captchaHPadding),
                     child: CaptchaView(
                       height: RegisterDimens.captchaHeight,
+                      verifyHandler: ApiService.verifyCaptcha,
                       onVerified: _onCaptchaVerified,
                     ),
                   ),
