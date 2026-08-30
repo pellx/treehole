@@ -195,4 +195,42 @@ class RegisterDimens {
   static const double loginTransferTipFontSize = 12;
   static const double loginTransferTipAlpha = 0.45;
   static const double loginTransferTipLineHeight = 1.5;
+
+  // ── 设备已注册引导页（device_registered_page）──
+  static const double deviceRegisteredButtonWidth = 220;
+  static const double deviceRegisteredButtonHeight = 40;
+  static const double deviceRegisteredButton1VOffset = 22;
+  static const double deviceRegisteredButton2VOffset = 76;
+  static const double deviceRegisteredButtonRadius = 13;
+  static const double deviceRegisteredButtonBorderWidth = 3;
+  static const double deviceRegisteredButtonFontSize = 16;
+  static const double deviceRegisteredButtonLetterSpacing = 1;
+  static const double deviceRegisteredHintVOffset = 128;
+  static const double deviceRegisteredHintFontSize = 12;
+  static const double deviceRegisteredHintAlpha = 0.45;
+
+  // ── 手机号验证码页（sms_login / sms_register）──
+  /// 交互内容区相对垂直中心的起点
+  static const double smsContentVOffset = 25;
+  static const double smsInputWidth = 200;
+  static const double smsInputHeight = 20;
+  static const double smsInputFontSize = 15;
+  static const double smsRowGap = 14;
+  static const double smsCodeInputWidth = 110;
+  static const double smsSendGap = 10;
+  static const double smsSendButtonWidth = 86;
+  static const double smsSendButtonHeight = 27;
+  static const double smsSendButtonRadius = 11;
+  static const double smsSendButtonBorderWidth = 2;
+  static const double smsSendButtonFontSize = 13;
+  static const double smsConfirmButtonWidth = 60;
+  static const double smsConfirmButtonHeight = 27;
+  static const double smsConfirmButtonRadius = 11;
+  static const double smsConfirmButtonBorderWidth = 2;
+  static const double smsConfirmButtonFontSize = 16;
+  static const double smsErrorGap = 12;
+  static const double smsErrorFontSize = 13;
+  static const double smsCaptchaTipGap = 8;
+  static const double smsCaptchaTipFontSize = 12;
+  static const double smsCaptchaTipAlpha = 0.45;
 }

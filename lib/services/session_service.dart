@@ -405,7 +405,7 @@ class SessionService {
     required String deviceSecret,
   }) async {
     final fingerprint = await DeviceFingerprintService.collect();
-    final fingerprintHash = _computeFingerprintHash(fingerprint);
+    final fingerprintHash = computeFingerprintHash(fingerprint);
 
     final createResult = await ApiService.createSession(
       userToken: userToken,
@@ -437,7 +437,7 @@ class SessionService {
     if (secret == null) return loginWithToken(userToken);
 
     final fingerprint = await DeviceFingerprintService.collect();
-    final fingerprintHash = _computeFingerprintHash(fingerprint);
+    final fingerprintHash = computeFingerprintHash(fingerprint);
     final bound = await ApiService.createBinding(
       userToken: userToken,
       fingerprintHash: fingerprintHash,
@@ -475,7 +475,7 @@ class SessionService {
     }
 
     final fingerprint = await DeviceFingerprintService.collect();
-    final fingerprintHash = _computeFingerprintHash(fingerprint);
+    final fingerprintHash = computeFingerprintHash(fingerprint);
     final result = await ApiService.login(
       userToken: token,
       fingerprintHash: fingerprintHash,
@@ -611,7 +611,7 @@ class SessionService {
   /// 与后端 FingerprintService.computeHardwareHash() v2 保持一致：
   /// 仅含严格硬件身份字段；数组 sort 后用逗号拼接；所有值用 | 连接后 SHA-256。
   /// 可变字段（ROM 构建信息、systemFeatures、serialNumber 等）已排除，见 advice.md。
-  static String _computeFingerprintHash(DeviceFingerprint fp) {
+  static String computeFingerprintHash(DeviceFingerprint fp) {
     final values = <String>[];
 
     void add(String value) => values.add(value);

@@ -362,7 +362,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
   "code": "123456",
   "user_display_id": "昵称",
   "device_finger_print": { "platform": "ios", "ios": {...} },
-  "verification_turnstile": "Cloudflare Turnstile token",
+  "verification_captcha": "阿里云验证码 2.0 captchaVerifyParam",
   "verification_pow": {
     "challenge_id": "...",
     "nonce": 123456
@@ -381,9 +381,10 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 
 **特性**
 
-- 与 `/user/register` 一样保留 Turnstile + PoW 防刷。
+- 与 `/user/registerV2` 一致：阿里云验证码 2.0 + PoW 防刷（captcha param 一次性，无需 consume）。
 - 事务内同时写入 `users`、`devices`、`fingerprints`、`user_device_binding`（active）及两个 history 表。
 - iOS 设备允许 `fingerprint_hash` 重复（不同用户各自独立建绑）。
+- Android 设备命中已注册指纹时不再拒绝：复用既有设备建新号并轮换 `device_secret`（「已注册设备引导页 → 注册新账号」只会出现在设备已注册的状态下）。
 
 **错误**
 
@@ -392,7 +393,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 400 | `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED` |
 | 400 | `PHONE_TAKEN` |
 | 400 | `NAME_TAKEN` |
-| 400 | `Turnstile 验证失败` / `PoW 验证失败` |
+| 400 | `验证码验证失败`（含 F00x）/ `PoW 验证失败` |
 
 ---
 
@@ -415,25 +416,36 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 ```json
 {
   "session_id": 1,
-  "session_secret": "64位hex"
+  "session_secret": "64位hex",
+  "user_token": "16位hex"
 }
 ```
+
+`user_token` 供客户端登记本机账户令牌（切号 / 解绑 failover 机制依赖）。
 
 **校验链路**
 
 1. 校验短信验证码
-2. 通过 `phone` 找到用户
+2. 通过 `phone` 找到用户；未找到时进入找回路径（见下）
 3. 在该用户的绑定范围内匹配 `fingerprint_hash` 定位设备（兼容 iOS 重复指纹）
 4. 检查 `session:device_owner` 切号锁
 5. 若尚无绑定则自动建绑
 6. 轮换 `device_secret`，签发 session
+
+**找回路径（未注册手机号）**
+
+`phone` 未注册时，按 `fingerprint_hash` 定位本机活绑定（active / unbind_pending）的账户：
+若其中**恰好只有一个**从未绑定过手机号的账户，则视为找回该账户——把该手机号绑定为账户手机号
+（短信验证码已通过、且全库无其他用户占用该号码），并继续正常登录流程。
+候选为 0 个（无匹配设备）或多个（无法消歧）时仍返回 `USER_NOT_FOUND`；
+已绑定手机号的账户必须用绑定手机号找回。
 
 **错误**
 
 | 状态码 | message | 说明 |
 |---|---|---|
 | 400 | `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED` | |
-| 401 | `USER_NOT_FOUND` | 该手机号未注册 |
+| 401 | `USER_NOT_FOUND` | 手机号未注册，且不满足找回路径条件 |
 | 401 | `FINGERPRINT_MISMATCH` | 该用户下无匹配指纹设备 |
 | 400 | `DEVICE_SESSION_LOCKED` | 本机切号锁被异用户占用 |
 | 400 | `REBIND_COOLDOWN` / `TRANSFER_REQUIRED` / `TRANSFER_INVALID` | 建绑受限 |
@@ -1890,7 +1902,7 @@ ios_sysname, ios_machine, ios_nodename
 注册：
 1. POST /user/sms/send { phone, scene: 'register' }
 2. 输入短信验证码
-3. POST /user/sms/register { phone, code, user_display_id, device_finger_print, turnstile, pow }
+3. POST /user/sms/register { phone, code, user_display_id, device_finger_print, verification_captcha, pow }
    → user_token + device_secret（已同时建绑）
 4. POST /user/session/create → session
 
@@ -1898,7 +1910,7 @@ ios_sysname, ios_machine, ios_nodename
 1. POST /user/sms/send { phone, scene: 'login' }
 2. 输入短信验证码
 3. POST /user/sms/login { phone, code, fingerprint_hash }
-   → session_id + session_secret
+   → session_id + session_secret + user_token
 ```
 
 iOS 下同一指纹可注册多个用户；登录时通过 `(user_id, fingerprint_hash)` 定位该用户的设备。

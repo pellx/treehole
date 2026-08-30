@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:ui' as ui;
@@ -11,6 +12,7 @@ import '../models/post.dart';
 import '../models/post_meta.dart';
 import 'pow.dart';
 import '../models/post_draft.dart';
+import '../models/sms_result.dart';
 import '../models/upload_result.dart';
 import '../models/version_info.dart';
 import 'timezone_service.dart';
@@ -921,7 +923,10 @@ class ApiService {
       }
       return null;
     } catch (e) {
-      lastError = '网络连接失败';
+      // 区分超时与连接失败：超时多为服务端处理慢（如阿里云 verify 耗时长），
+      // 提示用户重试而非误导为断网
+      lastError =
+          e is TimeoutException ? '服务器响应超时，请重试' : '网络连接失败';
       debugPrint('[ApiService] registerV2 error: $e');
       return null;
     }
@@ -1552,6 +1557,142 @@ class ApiService {
       debugPrint('[ApiService] cancelDeleteBinding error: $e');
       lastError = '网络连接失败';
       return false;
+    }
+  }
+
+  // ---- 手机号短信注册 / 登录（API.md 4b–4d）----
+
+  /// POST /user/sms/send — 发送短信验证码（scene: register | login | bind）
+  /// 冷却期内返回 sent=false 与剩余秒数，不视为错误
+  static Future<SmsSendResult?> smsSend({
+    required String phone,
+    required String scene,
+  }) async {
+    try {
+      final res = await _client
+          .post(
+            Uri.parse('$_userBase/sms/send'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'phone': phone,
+              'scene': scene,
+            }),
+          )
+          .timeout(_timeout);
+      if (_isHttpSuccess(res.statusCode)) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        return SmsSendResult(
+          sent: data['sent'] as bool? ?? false,
+          cooldownSeconds: (data['cooldown_seconds'] as num?)?.toInt() ?? 60,
+        );
+      }
+      lastError = _parseErrorMessage(res.body);
+      debugPrint(
+        '[ApiService] smsSend status=${res.statusCode} body=${res.body}',
+      );
+      return null;
+    } catch (e) {
+      lastError = '网络连接失败';
+      debugPrint('[ApiService] smsSend error: $e');
+      return null;
+    }
+  }
+
+  /// POST /user/sms/register — 手机号验证码注册，一步建号+建绑
+  /// 响应与 /user/registerV2 一致（user_token + device_secret）；
+  /// 验证码字段沿用 v2 的 verification_captcha（阿里云验证码 2.0）
+  static Future<RegisterResult?> smsRegister({
+    required String phone,
+    required String code,
+    required String userDisplayId,
+    required DeviceFingerprint deviceFingerPrint,
+    required String verificationCaptcha,
+    required PoWResult verificationPow,
+  }) async {
+    try {
+      final res = await _client
+          .post(
+            Uri.parse('$_userBase/sms/register'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'phone': phone,
+              'code': code,
+              'user_display_id': userDisplayId,
+              'device_finger_print': deviceFingerPrint.toJson(),
+              'verification_captcha': verificationCaptcha,
+              'verification_pow': {
+                'challenge_id': verificationPow.challengeId,
+                'nonce': verificationPow.nonce,
+              },
+            }),
+          )
+          .timeout(_timeout);
+      if (_isHttpSuccess(res.statusCode)) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final token = data['user_token'] as String?;
+        final secret = data['device_secret'] as String?;
+        if (token != null && secret != null) {
+          return RegisterResult(userToken: token, deviceSecret: secret);
+        }
+        lastError = '响应缺少字段';
+        debugPrint('[ApiService] smsRegister missing fields');
+      } else {
+        lastError = _parseErrorMessage(res.body);
+        debugPrint(
+          '[ApiService] smsRegister status=${res.statusCode} body=${res.body}',
+        );
+      }
+      return null;
+    } catch (e) {
+      lastError = '网络连接失败';
+      debugPrint('[ApiService] smsRegister error: $e');
+      return null;
+    }
+  }
+
+  /// POST /user/sms/login — 手机号验证码登录，服务端直接签发 session
+  /// （无需再走 /user/login + /user/session/create）
+  static Future<SmsLoginResult?> smsLogin({
+    required String phone,
+    required String code,
+    required String fingerprintHash,
+  }) async {
+    try {
+      final res = await _client
+          .post(
+            Uri.parse('$_userBase/sms/login'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'phone': phone,
+              'code': code,
+              'fingerprint_hash': fingerprintHash,
+            }),
+          )
+          .timeout(_timeout);
+      if (_isHttpSuccess(res.statusCode)) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final sid = (data['session_id'] as num?)?.toInt();
+        final ssecret = data['session_secret'] as String?;
+        if (sid != null && ssecret != null && ssecret.isNotEmpty) {
+          return SmsLoginResult(
+            sessionId: sid,
+            sessionSecret: ssecret,
+            userToken: data['user_token'] as String?,
+          );
+        }
+        lastError = '响应缺少字段';
+        debugPrint('[ApiService] smsLogin missing fields');
+      } else {
+        lastError = _parseErrorMessage(res.body);
+        debugPrint(
+          '[ApiService] smsLogin status=${res.statusCode} body=${res.body}',
+        );
+      }
+      return null;
+    } catch (e) {
+      lastError = '网络连接失败';
+      debugPrint('[ApiService] smsLogin error: $e');
+      return null;
     }
   }
 

@@ -10,7 +10,9 @@ import '../../services/device_fingerprint.dart';
 import '../../services/pow.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
+import '../settings/settings_navigation.dart';
 import 'captcha_view.dart';
+import 'device_registered_page.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_accent.dart';
 import '../../theme/app_dimens_register.dart';
@@ -26,7 +28,7 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  String _phase = 'checking'; // checking | registered | failed | unregistered | registering | naming | login | done
+  String _phase = 'checking'; // checking | failed | unregistered | registering | naming | login | done
   String? _error;
 
   DeviceFingerprint? _fingerprint;
@@ -107,7 +109,6 @@ class _RegisterPageState extends State<RegisterPage> {
           vOffset: RegisterDimens.trueVOffset,
           hOffset: RegisterDimens.trueHOffset,
         );
-      case 'registered':
       case 'failed':
         return (
           path: 'assets/mu/mu-flase.png',
@@ -149,8 +150,6 @@ class _RegisterPageState extends State<RegisterPage> {
         return '让我康康';
       case 'unregistered':
         return '您的设备可进行注册';
-      case 'registered':
-        return '设备环境无法注册';
       case 'failed':
         return '测试未通过，请重试';
       case 'registering':
@@ -185,7 +184,14 @@ class _RegisterPageState extends State<RegisterPage> {
         setState(() => _phase = 'failed');
         return;
       }
-      setState(() => _phase = registered ? 'registered' : 'unregistered');
+      if (registered) {
+        // 设备环境已注册：替换为引导页（手机号找回 / 手机号注册）
+        await Navigator.of(context).pushReplacement(
+          bottomUpRoute<void>(const DeviceRegisteredPage()),
+        );
+        return;
+      }
+      setState(() => _phase = 'unregistered');
     } catch (e) {
       if (mounted) setState(() => _phase = 'failed');
     }
@@ -505,104 +511,6 @@ class _RegisterPageState extends State<RegisterPage> {
                       color: onSurface,
                     )),
               ),
-            // 已注册提示文字
-            if (_phase == 'registered')
-              _offsetLayer(
-                vOffset: RegisterDimens.registeredVOffset,
-                hOffset: RegisterDimens.registeredHOffset,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: RegisterDimens.contentHPadding),
-                  child: _buildRegistered(colors),
-                ),
-              ),
-            // 已注册 — 登录按钮
-            if (_phase == 'registered')
-              _offsetLayer(
-                vOffset: RegisterDimens.registeredLoginButtonVOffset,
-                hOffset: RegisterDimens.registeredLoginButtonHOffset,
-                child: SizedBox(
-                  width: RegisterDimens.registeredLoginButtonWidth,
-                  height: RegisterDimens.registeredLoginButtonHeight,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _phase = 'login';
-                        _renameError = null;
-                      });
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: colors.register.buttonBg,
-                      foregroundColor: colors.register.buttonText,
-                      padding: EdgeInsets.symmetric(
-                        horizontal:
-                            RegisterDimens.registeredLoginButtonPaddingH,
-                        vertical:
-                            RegisterDimens.registeredLoginButtonPaddingV,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(
-                            RegisterDimens.registeredLoginButtonRadius),
-                        side: BorderSide(
-                          color: colors.register.buttonBorderColor,
-                          width: RegisterDimens
-                              .registeredLoginButtonBorderWidth,
-                        ),
-                      ),
-                    ),
-                    child: Text('登录',
-                        style: TextStyle(
-                          fontSize: RegisterDimens
-                              .registeredLoginButtonFontSize,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: RegisterDimens
-                              .registeredLoginButtonLetterSpacing,
-                        )),
-                  ),
-                ),
-              ),
-            // 已注册 — 联系我们按钮
-            if (_phase == 'registered')
-              _offsetLayer(
-                vOffset: RegisterDimens.registeredContactButtonVOffset,
-                hOffset: RegisterDimens.registeredContactButtonHOffset,
-                child: SizedBox(
-                  width: RegisterDimens.registeredContactButtonWidth,
-                  height: RegisterDimens.registeredContactButtonHeight,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      // TODO: 导航到联系我们页
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: colors.register.buttonBg,
-                      foregroundColor: colors.register.buttonText,
-                      padding: EdgeInsets.symmetric(
-                        horizontal: RegisterDimens
-                            .registeredContactButtonPaddingH,
-                        vertical: RegisterDimens
-                            .registeredContactButtonPaddingV,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(
-                            RegisterDimens.registeredContactButtonRadius),
-                        side: BorderSide(
-                          color: colors.register.buttonBorderColor,
-                          width: RegisterDimens
-                              .registeredContactButtonBorderWidth,
-                        ),
-                      ),
-                    ),
-                    child: Text('联系我们',
-                        style: TextStyle(
-                          fontSize: RegisterDimens
-                              .registeredContactButtonFontSize,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: RegisterDimens
-                              .registeredContactButtonLetterSpacing,
-                        )),
-                  ),
-                ),
-              ),
             // 交互内容 — 按钮/输入框等
             if (_phase == 'unregistered' && _error == null)
               _offsetLayer(
@@ -733,8 +641,6 @@ class _RegisterPageState extends State<RegisterPage> {
     switch (_phase) {
       case 'checking':
         return const SizedBox.shrink();
-      case 'registered':
-        return const SizedBox.shrink();
       case 'failed':
         return const SizedBox.shrink();
       case 'unregistered':
@@ -765,18 +671,6 @@ class _RegisterPageState extends State<RegisterPage> {
         const SizedBox(height: RegisterDimens.errorRetryGap),
         TextButton(onPressed: _check, child: const Text('重试')),
       ],
-    );
-  }
-
-  Widget _buildRegistered(AppColors colors) {
-    return Text(
-      '设备环境已被注册，请登录已有账户或联系我们进行注册',
-      style: TextStyle(
-        fontSize: RegisterDimens.registeredFontSize,
-        color: colors.register.registeredTextColor,
-        height: RegisterDimens.registeredLineHeight,
-      ),
-      textAlign: TextAlign.center,
     );
   }
 
