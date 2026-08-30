@@ -894,6 +894,9 @@ class ApiService {
           'nonce': verificationPow.nonce,
         },
       };
+      debugPrint('[ApiService] registerV2 提交 name=$userDisplayId '
+          'captcha(len=${verificationCaptcha.length}) '
+          'pow=${verificationPow.challengeId}/nonce=${verificationPow.nonce}');
       final res = await _client
           .post(
             Uri.parse('$_userBase/registerV2'),

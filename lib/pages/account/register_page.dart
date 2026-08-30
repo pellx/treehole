@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../models/device_fingerprint.dart';
 import '../../services/api.dart';
@@ -11,7 +10,7 @@ import '../../services/device_fingerprint.dart';
 import '../../services/pow.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
-import '../../services/captcha_service.dart';
+import 'captcha_sheet.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_accent.dart';
 import '../../theme/app_dimens_register.dart';
@@ -41,20 +40,15 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _submitting = false;
   String? _renameError;
 
-  WebViewController? _webViewController;
-
-  _StepStatus _captchaStatus = _StepStatus.pending;
   _StepStatus _powStatus = _StepStatus.pending;
 
-  // 预取验证结果（页面加载时后台开始，点击注册时直接使用）
-  String? _preCaptchaToken;
+  // 预取 PoW（页面加载时后台开始，点击注册时直接使用）
   int? _prePowNonce;
   PoWChallenge? _prePowChallenge;
 
   @override
   void initState() {
     super.initState();
-    _initCaptcha();
     _nameController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -69,7 +63,7 @@ class _RegisterPageState extends State<RegisterPage> {
       _phase = 'login';
     } else {
       _check();
-      _preFetchVerification();
+      _preFetchPow();
     }
   }
 
@@ -170,16 +164,6 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  Future<void> _initCaptcha() async {
-    try {
-      final controller = WebViewController();
-      CaptchaService.instance.bindController(controller);
-      setState(() => _webViewController = controller);
-    } catch (e) {
-      debugPrint('[Register] Captcha init failed: $e');
-    }
-  }
-
   Future<void> _check() async {
     setState(() { _phase = 'checking'; _error = null; });
     final stopwatch = Stopwatch()..start();
@@ -207,18 +191,14 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  /// 后台预取 PoW 和验证码，缩短点击注册后的等待时间
-  void _preFetchVerification() {
-    // PoW
+  /// 后台预取 PoW，缩短点击注册后的等待时间。
+  /// 验证码改为确认提交时在浮层中完成（用户真实交互，获取后立即使用）。
+  void _preFetchPow() {
     ApiService.getPoWChallenge().then((challenge) async {
       if (challenge == null || !mounted) return;
       _prePowChallenge = challenge;
       final nonce = await PoWService.solve(challenge);
       if (mounted && nonce != null) _prePowNonce = nonce;
-    });
-    // 阿里云验证码
-    CaptchaService.instance.getToken().then((token) {
-      if (mounted && token != null) _preCaptchaToken = token;
     });
   }
 
@@ -226,7 +206,6 @@ class _RegisterPageState extends State<RegisterPage> {
   void _reset() {
     _nameController.clear();
     _tokenController.clear();
-    _preCaptchaToken = null;
     _prePowNonce = null;
     _prePowChallenge = null;
     setState(() {
@@ -234,10 +213,10 @@ class _RegisterPageState extends State<RegisterPage> {
       _error = null;
       _submitting = false;
       _renameError = null;
-      _captchaStatus = _StepStatus.pending;
       _powStatus = _StepStatus.pending;
     });
     _check();
+    _preFetchPow();
   }
 
   Future<void> _startRegister() async {
@@ -248,14 +227,9 @@ class _RegisterPageState extends State<RegisterPage> {
         return;
       }
 
-      // 优先使用预取结果
-      final hasPrePow = _prePowNonce != null && _prePowChallenge != null;
-      final hasPreCaptcha = _preCaptchaToken != null;
-
-      if (hasPrePow && hasPreCaptcha) {
-        // 预取完成，直接跳到取名
+      // PoW 预取完成，直接跳到取名（验证码在确认提交时的浮层中完成）
+      if (_prePowNonce != null && _prePowChallenge != null) {
         setState(() {
-          _captchaStatus = _StepStatus.completed;
           _powStatus = _StepStatus.completed;
           _phase = 'naming';
         });
@@ -266,43 +240,28 @@ class _RegisterPageState extends State<RegisterPage> {
       setState(() {
         _phase = 'registering';
         _error = null;
-        _captchaStatus = hasPreCaptcha ? _StepStatus.completed : _StepStatus.loading;
-        _powStatus = hasPrePow ? _StepStatus.completed : _StepStatus.loading;
+        _powStatus = _StepStatus.loading;
       });
 
       // PoW
-      int? nonce = _prePowNonce;
+      final challenge = await ApiService.getPoWChallenge();
+      if (!mounted) return;
+      if (challenge == null) {
+        setState(() { _powStatus = _StepStatus.failed; _phase = 'failed'; });
+        return;
+      }
+      final nonce = await PoWService.solve(challenge);
+      if (!mounted) return;
       if (nonce == null) {
-        final challenge = await ApiService.getPoWChallenge();
-        if (challenge == null) {
-          setState(() { _powStatus = _StepStatus.failed; _phase = 'failed'; });
-          return;
-        }
-        nonce = await PoWService.solve(challenge);
-        if (nonce == null || !mounted) {
-          setState(() { _powStatus = _StepStatus.failed; _phase = 'failed'; });
-          return;
-        }
-        _prePowNonce = nonce;
-        _prePowChallenge = challenge;
-        setState(() => _powStatus = _StepStatus.completed);
+        setState(() { _powStatus = _StepStatus.failed; _phase = 'failed'; });
+        return;
       }
-
-      // 阿里云验证码
-      String? captchaToken = _preCaptchaToken;
-      if (captchaToken == null) {
-        captchaToken = await CaptchaService.instance.getToken();
-        if (!mounted) return;
-        if (captchaToken == null) {
-          setState(() { _captchaStatus = _StepStatus.failed; _phase = 'failed'; });
-          return;
-        }
-        _preCaptchaToken = captchaToken;
-        setState(() => _captchaStatus = _StepStatus.completed);
-      }
-
-      // 验证通过 → 进入取名阶段
-      setState(() => _phase = 'naming');
+      _prePowChallenge = challenge;
+      _prePowNonce = nonce;
+      setState(() {
+        _powStatus = _StepStatus.completed;
+        _phase = 'naming';
+      });
     } catch (e) {
       if (mounted) setState(() => _error = '注册失败：$e');
     }
@@ -312,6 +271,7 @@ class _RegisterPageState extends State<RegisterPage> {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
 
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() { _submitting = true; _renameError = null; });
 
     try {
@@ -321,21 +281,38 @@ class _RegisterPageState extends State<RegisterPage> {
         return;
       }
 
-      // 阿里云 token 一次性（复用报 F008）：上次失败已清空，这里重新获取
-      if (_preCaptchaToken == null) {
-        final token = await CaptchaService.instance.getToken();
+      // PoW challenge TTL 约 3 分钟（API.md 3a）：在取名页停留过久会过期
+      // （服务端报「PoW 验证失败」后已清空），缺失时重新获取
+      if (_prePowChallenge == null || _prePowNonce == null) {
+        final challenge = await ApiService.getPoWChallenge();
         if (!mounted) return;
-        if (token == null) {
-          setState(() => _renameError = '验证码获取失败，请重试');
+        if (challenge == null) {
+          setState(() => _renameError = 'PoW 获取失败，请重试');
           return;
         }
-        _preCaptchaToken = token;
+        final nonce = await PoWService.solve(challenge);
+        if (!mounted) return;
+        if (nonce == null) {
+          setState(() => _renameError = 'PoW 计算失败，请重试');
+          return;
+        }
+        _prePowChallenge = challenge;
+        _prePowNonce = nonce;
+      }
+
+      // 验证码在提交时由用户在浮层中真实完成（官方明确 App 内自动触发
+      // 无痕验证会被风控拒绝），param 获取后立即提交，无时效/复用问题
+      final captchaToken = await CaptchaSheet.show(context);
+      if (!mounted) return;
+      if (captchaToken == null) {
+        setState(() => _renameError = '未完成安全验证，请重试');
+        return;
       }
 
       final result = await ApiService.registerV2(
         userDisplayId: name,
         deviceFingerPrint: fp,
-        verificationCaptcha: _preCaptchaToken!,
+        verificationCaptcha: captchaToken,
         verificationPow: PoWResult(
           challengeId: _prePowChallenge!.challengeId,
           nonce: _prePowNonce!,
@@ -345,8 +322,12 @@ class _RegisterPageState extends State<RegisterPage> {
       if (!mounted) return;
 
       if (result == null) {
-        // 关键：captchaVerifyParam 一次性，失败后必须清空，下次重试重新获取
-        _preCaptchaToken = null;
+        // PoW 校验不消费 challenge；仅过期被拒（TTL 约 3 分钟）时重取。
+        // 验证码 param 一次性且每次确认都重新获取，无需失效处理
+        if (ApiService.lastError == 'PoW 验证失败') {
+          _prePowChallenge = null;
+          _prePowNonce = null;
+        }
         setState(() => _renameError = _mapRegisterError(ApiService.lastError));
         return;
       }
@@ -753,20 +734,6 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                 ),
               ),
-            // 验证码 WebView 需挂在树上才能跑 JS（1×1 透明，不拦截触摸）
-            if (_webViewController != null)
-              Positioned(
-                left: 0,
-                top: 0,
-                width: 1,
-                height: 1,
-                child: Opacity(
-                  opacity: 0,
-                  child: IgnorePointer(
-                    child: WebViewWidget(controller: _webViewController!),
-                  ),
-                ),
-              ),
           ],
               );
             },
@@ -860,8 +827,6 @@ class _RegisterPageState extends State<RegisterPage> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _buildStepRow('验证码检测', _captchaStatus, colors, onSurface),
-        const SizedBox(height: RegisterDimens.stepGap),
         _buildStepRow('PoW 检测', _powStatus, colors, onSurface),
         if (_error != null) ...[
           const SizedBox(height: RegisterDimens.stepErrorGap),
