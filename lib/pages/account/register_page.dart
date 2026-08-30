@@ -10,12 +10,10 @@ import '../../services/device_fingerprint.dart';
 import '../../services/pow.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
-import 'captcha_sheet.dart';
+import 'captcha_view.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_accent.dart';
 import '../../theme/app_dimens_register.dart';
-
-enum _StepStatus { pending, loading, completed, failed }
 
 class RegisterPage extends StatefulWidget {
   /// 为 true 时直接进入令牌登录（供账户切换页「登录用户」）
@@ -40,11 +38,13 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _submitting = false;
   String? _renameError;
 
-  _StepStatus _powStatus = _StepStatus.pending;
-
-  // 预取 PoW（页面加载时后台开始，点击注册时直接使用）
+  // 预取 PoW（页面加载时后台开始，纯后台进行，不在界面展示）
   int? _prePowNonce;
   PoWChallenge? _prePowChallenge;
+  bool _powFetching = false;
+
+  // 「通过一些测试」阶段由用户完成阿里云点击验证后持有，提交时使用
+  String? _captchaToken;
 
   @override
   void initState() {
@@ -191,14 +191,28 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  /// 后台预取 PoW，缩短点击注册后的等待时间。
-  /// 验证码改为确认提交时在浮层中完成（用户真实交互，获取后立即使用）。
+  /// 后台预取 PoW（纯后台，不在界面展示），缩短提交时的等待
   void _preFetchPow() {
+    if (_powFetching) return;
+    _powFetching = true;
     ApiService.getPoWChallenge().then((challenge) async {
-      if (challenge == null || !mounted) return;
+      if (challenge == null || !mounted) {
+        _powFetching = false;
+        return;
+      }
       _prePowChallenge = challenge;
       final nonce = await PoWService.solve(challenge);
+      _powFetching = false;
       if (mounted && nonce != null) _prePowNonce = nonce;
+    });
+  }
+
+  /// 验证通过（用户在「通过一些测试」阶段真实点击完成）→ 进入取名
+  void _onCaptchaVerified(String token) {
+    if (!mounted) return;
+    setState(() {
+      _captchaToken = token;
+      _phase = 'naming';
     });
   }
 
@@ -208,63 +222,30 @@ class _RegisterPageState extends State<RegisterPage> {
     _tokenController.clear();
     _prePowNonce = null;
     _prePowChallenge = null;
+    _captchaToken = null;
     setState(() {
       _phase = 'checking';
       _error = null;
       _submitting = false;
       _renameError = null;
-      _powStatus = _StepStatus.pending;
     });
     _check();
     _preFetchPow();
   }
 
-  Future<void> _startRegister() async {
-    try {
-      final fp = _fingerprint;
-      if (fp == null) {
-        setState(() => _phase = 'failed');
-        return;
-      }
-
-      // PoW 预取完成，直接跳到取名（验证码在确认提交时的浮层中完成）
-      if (_prePowNonce != null && _prePowChallenge != null) {
-        setState(() {
-          _powStatus = _StepStatus.completed;
-          _phase = 'naming';
-        });
-        return;
-      }
-
-      // 预取未完成，显示加载状态并等待
-      setState(() {
-        _phase = 'registering';
-        _error = null;
-        _powStatus = _StepStatus.loading;
-      });
-
-      // PoW
-      final challenge = await ApiService.getPoWChallenge();
-      if (!mounted) return;
-      if (challenge == null) {
-        setState(() { _powStatus = _StepStatus.failed; _phase = 'failed'; });
-        return;
-      }
-      final nonce = await PoWService.solve(challenge);
-      if (!mounted) return;
-      if (nonce == null) {
-        setState(() { _powStatus = _StepStatus.failed; _phase = 'failed'; });
-        return;
-      }
-      _prePowChallenge = challenge;
-      _prePowNonce = nonce;
-      setState(() {
-        _powStatus = _StepStatus.completed;
-        _phase = 'naming';
-      });
-    } catch (e) {
-      if (mounted) setState(() => _error = '注册失败：$e');
+  /// 点击「注册」→ 进入「通过一些测试」阶段，页面上嵌入阿里云点击验证；
+  /// PoW 在后台预取，用户完成验证后即进入取名
+  void _startRegister() {
+    final fp = _fingerprint;
+    if (fp == null) {
+      setState(() => _phase = 'failed');
+      return;
     }
+    setState(() {
+      _phase = 'registering';
+      _error = null;
+    });
+    _preFetchPow();
   }
 
   Future<void> _confirmName() async {
@@ -300,12 +281,12 @@ class _RegisterPageState extends State<RegisterPage> {
         _prePowNonce = nonce;
       }
 
-      // 验证码在提交时由用户在浮层中真实完成（官方明确 App 内自动触发
-      // 无痕验证会被风控拒绝），param 获取后立即提交，无时效/复用问题
-      final captchaToken = await CaptchaSheet.show(context);
-      if (!mounted) return;
+      // 验证码在「通过一些测试」阶段由用户真实点击完成（官方明确 App 内
+      // 自动触发无痕验证会被风控拒绝）。token 一次性：提交失败后清空，
+      // 再次确认时自动回到验证阶段重新获取
+      final captchaToken = _captchaToken;
       if (captchaToken == null) {
-        setState(() => _renameError = '未完成安全验证，请重试');
+        setState(() => _phase = 'registering');
         return;
       }
 
@@ -323,7 +304,9 @@ class _RegisterPageState extends State<RegisterPage> {
 
       if (result == null) {
         // PoW 校验不消费 challenge；仅过期被拒（TTL 约 3 分钟）时重取。
-        // 验证码 param 一次性且每次确认都重新获取，无需失效处理
+        // 验证码 param 一次性：任何到达服务端的尝试都会消费它，必须清空，
+        // 再次确认时回到验证阶段重新获取（复用报 F008）
+        _captchaToken = null;
         if (ApiService.lastError == 'PoW 验证失败') {
           _prePowChallenge = null;
           _prePowNonce = null;
@@ -658,7 +641,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: RegisterDimens.contentHPadding),
-                  child: _buildRegistering(colors, onSurface),
+                  child: CaptchaView(onVerified: _onCaptchaVerified),
                 ),
               )
             else if (_phase == 'naming')
@@ -755,8 +738,6 @@ class _RegisterPageState extends State<RegisterPage> {
         return _error != null
             ? _buildError(onSurface)
             : _buildRegisterButton(colors);
-      case 'registering':
-        return _buildRegistering(colors, onSurface);
       case 'naming':
         return const SizedBox.shrink();
       case 'login':
@@ -820,24 +801,6 @@ class _RegisterPageState extends State<RegisterPage> {
               letterSpacing: RegisterDimens.buttonLetterSpacing,
             )),
       ),
-    );
-  }
-
-  Widget _buildRegistering(AppColors colors, Color onSurface) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildStepRow('PoW 检测', _powStatus, colors, onSurface),
-        if (_error != null) ...[
-          const SizedBox(height: RegisterDimens.stepErrorGap),
-          Text(_error!,
-              style: TextStyle(
-                fontSize: RegisterDimens.stepFontSize,
-                color: colors.register.errorText,
-              ),
-              textAlign: TextAlign.center),
-        ],
-      ],
     );
   }
 
@@ -1124,54 +1087,4 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
-  Widget _buildStepRow(String label, _StepStatus status, AppColors colors, Color onSurface) {
-    final regColors = colors.register;
-
-    final textColor = switch (status) {
-      _StepStatus.completed => regColors.stepCompleted,
-      _StepStatus.failed => regColors.errorText,
-      _ => onSurface.withValues(alpha: RegisterDimens.stepDefaultAlpha),
-    };
-
-    final statusText = switch (status) {
-      _StepStatus.pending => '',
-      _StepStatus.loading => '中...',
-      _StepStatus.completed => '通过',
-      _StepStatus.failed => '失败',
-    };
-
-    Widget leading;
-    switch (status) {
-      case _StepStatus.pending:
-        leading = Icon(Icons.circle_outlined,
-            size: RegisterDimens.stepIconSize,
-            color: textColor.withValues(alpha: RegisterDimens.stepPendingAlpha));
-      case _StepStatus.loading:
-        leading = SizedBox(
-            width: RegisterDimens.stepIconSize,
-            height: RegisterDimens.stepIconSize,
-            child: CircularProgressIndicator(
-              strokeWidth: RegisterDimens.stepLoadingStrokeWidth,
-              valueColor: AlwaysStoppedAnimation(regColors.loadingIndicator),
-            ));
-      case _StepStatus.completed:
-        leading = Icon(Icons.check_circle,
-            size: RegisterDimens.stepIconSize,
-            color: regColors.stepCompleted);
-      case _StepStatus.failed:
-        leading = Icon(Icons.cancel,
-            size: RegisterDimens.stepIconSize,
-            color: regColors.errorText);
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        leading,
-        const SizedBox(width: RegisterDimens.stepIconGap),
-        Text('$label$statusText',
-            style: TextStyle(fontSize: RegisterDimens.stepFontSize, color: textColor)),
-      ],
-    );
-  }
 }
