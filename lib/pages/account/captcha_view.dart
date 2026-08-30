@@ -55,10 +55,31 @@ class _CaptchaViewState extends State<CaptchaView> {
       ..setBackgroundColor(Colors.transparent)
       ..addJavaScriptChannel('CaptchaChannel', onMessageReceived: _onMessage)
       ..setNavigationDelegate(NavigationDelegate(
-        onPageFinished: (_) {
+        onPageFinished: (_) async {
+          // 校验页面脚本可用：托管页被 CSP 拦截时内联脚本不执行、也无资源
+          // 错误事件，须主动探测。不可用则回退内联 HTML（loadHtmlString
+          // 非 HTTP 响应、不受 CSP 限制，内容与托管页一致）
+          var scriptOk = false;
+          try {
+            final result = await controller
+                .runJavaScriptReturningResult(
+                    'typeof window.__renderCaptcha === "function"');
+            scriptOk = result.toString() == 'true';
+          } catch (_) {}
+          if (!scriptOk && _useHostedPage) {
+            debugPrint('[CaptchaView] 托管页脚本不可用（CSP?），回退内联 HTML');
+            if (!mounted) return;
+            setState(() => _useHostedPage = false);
+            _loadPage();
+            return;
+          }
           if (!mounted) return;
           setState(() => _loaded = true);
-          controller.runJavaScript('window.__renderCaptcha()');
+          try {
+            await controller.runJavaScript('window.__renderCaptcha()');
+          } catch (e) {
+            debugPrint('[CaptchaView] render call failed: $e');
+          }
         },
         onWebResourceError: (err) {
           debugPrint('[CaptchaView] Resource error: '
