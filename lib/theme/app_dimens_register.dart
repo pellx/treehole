@@ -95,6 +95,11 @@ class RegisterDimens {
   static const double stepDefaultAlpha = 0.6;
   static const double stepErrorGap = 16; // 步骤区和错误信息间距
 
+  // ── 验证码嵌入视图（registering 阶段；一点即过条高约 40，滑块挑战略高）──
+  static const double captchaVOffset = 30;
+  static const double captchaHOffset = 0;
+  static const double captchaHeight = 64;
+
   // ── 注册页图片 — flower（输入用户名）──
   static const double flowerWidth = 270;
   static const double flowerHeight = 1000;

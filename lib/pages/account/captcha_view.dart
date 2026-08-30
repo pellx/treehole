@@ -6,14 +6,24 @@ import '../../services/captcha_service.dart';
 
 /// 阿里云验证码（一点即过/滑块）内嵌视图。
 ///
-/// 嵌在注册页「通过一些测试」阶段：用户完成真实点击验证后经 [onVerified]
-/// 回传 captchaVerifyParam。失败时在原位展示原因（服务端已映射为带错误码的
-/// 中文），可重试——整页重载以规避 SDK「只能初始化一次」。
+/// 嵌在注册页「通过一些测试」阶段的页面元素流上，与图片/文字共用同一套
+/// 中心偏移定位。WebView 背景透明（控制器背景 + HTML body 均透明，
+/// Android 默认 TLHC 渲染支持透明合成），页面上只露出验证控件本身。
+/// 用户完成真实点击验证后经 [onVerified] 回传 captchaVerifyParam；
+/// 失败时在原位展示原因（服务端已映射为带错误码的中文），可重试——
+/// 整页重载以规避 SDK「只能初始化一次」。
 class CaptchaView extends StatefulWidget {
   /// 验证通过回调，参数为 captchaVerifyParam（须立即提交业务请求）
   final ValueChanged<String> onVerified;
 
-  const CaptchaView({super.key, required this.onVerified});
+  /// 视图高度：容纳一点即过验证条；升级挑战（滑块）时亦够用
+  final double height;
+
+  const CaptchaView({
+    super.key,
+    required this.onVerified,
+    this.height = 64,
+  });
 
   @override
   State<CaptchaView> createState() => _CaptchaViewState();
@@ -39,6 +49,7 @@ class _CaptchaViewState extends State<CaptchaView> {
     final controller = WebViewController();
     controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.transparent)
       ..addJavaScriptChannel('CaptchaChannel', onMessageReceived: _onMessage)
       ..setNavigationDelegate(NavigationDelegate(
         onPageFinished: (_) {
@@ -71,21 +82,30 @@ class _CaptchaViewState extends State<CaptchaView> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 210,
+      height: widget.height,
       width: double.infinity,
       child: _error != null
           ? _buildError(context)
           : _controller == null
-              ? const Center(child: CircularProgressIndicator())
-              : ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Stack(
-                    children: [
-                      WebViewWidget(controller: _controller!),
-                      if (!_loaded)
-                        const Center(child: CircularProgressIndicator()),
-                    ],
+              ? const Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
+                )
+              : Stack(
+                  children: [
+                    WebViewWidget(controller: _controller!),
+                    if (!_loaded)
+                      const Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
+                  ],
                 ),
     );
   }
@@ -93,18 +113,25 @@ class _CaptchaViewState extends State<CaptchaView> {
   Widget _buildError(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     return Center(
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(_error!,
-              style: TextStyle(
-                  fontSize: 13, color: onSurface.withValues(alpha: 0.7)),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 12),
-          TextButton.icon(
-            onPressed: _loadPage,
-            icon: const Icon(Icons.refresh, size: 18),
-            label: const Text('重试'),
+          Flexible(
+            child: Text(_error!,
+                style: TextStyle(
+                    fontSize: 13,
+                    color: onSurface.withValues(alpha: 0.7)),
+                textAlign: TextAlign.center),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: _loadPage,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+              child: Icon(Icons.refresh,
+                  size: 20, color: onSurface.withValues(alpha: 0.6)),
+            ),
           ),
         ],
       ),

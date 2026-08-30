@@ -25,8 +25,10 @@ class CaptchaPage {
 
   /// 构建验证码页面 HTML（prefix/region/sceneId 由 local.dart 注入）。
   ///
-  /// 嵌入式（mode: 'embed'）渲染在 element 上：智能验证场景展示「点击开始/
-  /// 滑块」控件，由用户真实点击触发；无痕验证场景则静默通过后直接回调。
+  /// 嵌入式（mode: 'embed'）渲染在 element 上：一点即过场景展示「确认您
+  /// 不是机器人」复选条，用户真实点击触发；高风险升级挑战（滑块等）由
+  /// SDK 在同区域渲染。页面背景透明、无额外排版，使 WebView 在宿主页面
+  /// 上只露出验证控件本身（尺寸与定位由 Flutter 侧布局决定）。
   /// 页面不含自动触发逻辑（官方明确自动触发无痕验证可能不通过）。
   static String buildHtml() => '''
 <!DOCTYPE html>
@@ -43,8 +45,7 @@ class CaptchaPage {
   </script>
   <script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
   <style>
-    body { margin: 0; padding: 0; background: #fafafa; display: flex;
-           align-items: center; justify-content: center; min-height: 100vh; }
+    body { margin: 0; padding: 0; background: transparent; }
     #captcha-element { width: 100%; }
   </style>
 </head>

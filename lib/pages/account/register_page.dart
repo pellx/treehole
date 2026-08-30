@@ -636,12 +636,15 @@ class _RegisterPageState extends State<RegisterPage> {
               )
             else if (_phase == 'registering')
               _offsetLayer(
-                vOffset: RegisterDimens.stepVOffset,
-                hOffset: RegisterDimens.stepHOffset,
+                vOffset: RegisterDimens.captchaVOffset,
+                hOffset: RegisterDimens.captchaHOffset,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                       horizontal: RegisterDimens.contentHPadding),
-                  child: CaptchaView(onVerified: _onCaptchaVerified),
+                  child: CaptchaView(
+                    height: RegisterDimens.captchaHeight,
+                    onVerified: _onCaptchaVerified,
+                  ),
                 ),
               )
             else if (_phase == 'naming')
