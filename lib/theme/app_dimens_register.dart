@@ -98,7 +98,9 @@ class RegisterDimens {
   // ── 验证码嵌入视图（registering 阶段；一点即过条高约 40，滑块挑战略高）──
   static const double captchaVOffset = 30;
   static const double captchaHOffset = 0;
-  static const double captchaHeight = 64;
+  static const double captchaHeight = 72;
+  /// 验证条 SDK 固定 320 宽，内边距须保证容器 ≥ 320（屏宽 - 2×20）
+  static const double captchaHPadding = 20;
 
   // ── 注册页图片 — flower（输入用户名）──
   static const double flowerWidth = 270;

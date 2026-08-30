@@ -52,7 +52,8 @@ class CaptchaPage {
   <script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
   <style>
     body { margin: 0; padding: 0; background: transparent; }
-    #captcha-element { width: 100%; }
+    /* 固定 320 宽并水平居中：点击后 SDK 重排不会左右跳动，logo 不被裁切 */
+    #captcha-element { width: 320px; margin: 0 auto; }
   </style>
 </head>
 <body>

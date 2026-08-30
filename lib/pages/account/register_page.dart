@@ -640,7 +640,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 hOffset: RegisterDimens.captchaHOffset,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: RegisterDimens.contentHPadding),
+                      horizontal: RegisterDimens.captchaHPadding),
                   child: CaptchaView(
                     height: RegisterDimens.captchaHeight,
                     onVerified: _onCaptchaVerified,
