@@ -15,6 +15,9 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
   - 新增接口：`POST /user/sms/send`、`/user/sms/register`、`/user/sms/login`、`/user/sms/bind`
   - 使用阿里云「号码认证服务 - 短信认证」（Dypnsapi）下发和校验验证码
   - 注册一步完成建号 + 建绑；登录直接签发 session
+- **新增一对一私聊（文本）**
+  - 新增接口：`POST /chat/lookup`、`/chat/dm`、`/chat/conversations`、`/chat/send`、`/chat/history`、`/chat/read`
+  - Socket.IO 事件 `chat.message` 推到房间 `user:{user_id}`（不断开连接）
 - **iOS fingerprint_hash 冲突解决**
   - Android 保持 `fingerprint_hash` 全局唯一
   - iOS 允许同一指纹在不同用户下重复，登录时按 `(user_id, fingerprint_hash)` 定位设备
@@ -54,6 +57,13 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
   - [18. POST /user/binding/delete-cancel](#18-post-userbindingdelete-cancel)
   - [19. POST /user/binding/primary-transfer](#19-post-userbindingprimary-transfer)
   - [20. POST /user/binding/primary-transfer-cancel](#20-post-userbindingprimary-transfer-cancel)
+- [私聊 API](#私聊-api)
+  - [20b. POST /chat/lookup](#20b-post-chatlookup)
+  - [20c. POST /chat/dm](#20c-post-chatdm)
+  - [20d. POST /chat/conversations](#20d-post-chatconversations)
+  - [20e. POST /chat/send](#20e-post-chatsend)
+  - [20f. POST /chat/history](#20f-post-chathistory)
+  - [20g. POST /chat/read](#20g-post-chatread)
 - [贴文 API](#贴文-api)
   - [21. POST /posts](#21-post-posts)
   - [22. POST /posts/comment](#22-post-postscomment)
@@ -1171,6 +1181,106 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 
 ---
 
+## 私聊 API
+
+全部 🔒，需有效 session。内部用 `user_id` 寻址；对外可按**当前昵称或曾用名**查找。匿名帖没有作者，不能从广场发起。不能给自己发。
+
+发送正文走与发帖相同的文本审核。同一用户 60 秒内最多 40 条。实时推送走 Socket.IO 事件 `chat.message`，房间 `user:{user_id}`，**不断开**连接。
+
+### 20b. POST /chat/lookup
+
+按昵称查找用户（当前名或 `user_identifier_history` 曾用名）。返回该用户**当前**昵称。
+
+**请求**
+
+```json
+{
+  "session_id": 1,
+  "session_secret": "...",
+  "display_id": "昵称"
+}
+```
+
+**响应** `200`
+
+```json
+{ "user_id": 7, "user_display_id": "当前昵称" }
+```
+
+**错误**：`USER_NOT_FOUND` / `NAME_EMPTY` / `MISSING_SESSION` / `SESSION_INVALID`
+
+### 20c. POST /chat/dm
+
+获取或创建一对一会话。`peer_user_id` 与 `peer_display_id` 至少传一个。
+
+**响应** `200`
+
+```json
+{
+  "id": 12,
+  "peer_user_id": 7,
+  "peer_display_id": "昵称",
+  "last_preview": null,
+  "last_message_at": null,
+  "last_sender_user_id": null,
+  "unread_count": 0
+}
+```
+
+**错误**：`PEER_REQUIRED` / `USER_NOT_FOUND` / `CHAT_SELF`
+
+### 20d. POST /chat/conversations
+
+当前用户会话列表（按最近消息时间倒序）。
+
+**响应** `200`
+
+```json
+{ "items": [ { "id": 12, "peer_user_id": 7, "peer_display_id": "昵称", "last_preview": "你好", "last_message_at": "...", "last_sender_user_id": 7, "unread_count": 2 } ] }
+```
+
+### 20e. POST /chat/send
+
+发送文本。可选 `client_msg_id`（同一会话同一发送方幂等）。
+
+**请求**
+
+```json
+{
+  "session_id": 1,
+  "session_secret": "...",
+  "conversation_id": 12,
+  "body": "你好",
+  "client_msg_id": "可选-uuid"
+}
+```
+
+**响应** `200`
+
+```json
+{
+  "id": 100,
+  "conversation_id": 12,
+  "sender_user_id": 3,
+  "body": "你好",
+  "created_at": "2026-08-31T00:00:00.000Z"
+}
+```
+
+成功后向双方 `user:{id}` 房间推送 `chat.message`（payload 含 `conversation` + `message`；未读数按接收方计算）。
+
+**错误**：`MESSAGE_EMPTY` / `RATE_LIMITED` / `CONVERSATION_NOT_FOUND` / `CONVERSATION_FORBIDDEN` / 内容审核未通过
+
+### 20f. POST /chat/history
+
+历史消息。`before_id` 向前翻页；默认 30 条，最多 50。返回按时间正序。
+
+### 20g. POST /chat/read
+
+标记已读：`last_read_message_id`。将该会话自己的未读清零。
+
+---
+
 ## 贴文 API
 
 发帖前须先用 [28. POST /file-processor/upload](#28-post-file-processorupload) 预上传文件，再把返回的 `filename` 填入 `uploaded`。  
@@ -1869,6 +1979,34 @@ io('https://<host>', {
 
 ### 服务端 → 客户端事件
 
+#### `chat.message`
+
+一对一私聊新消息。推到双方的 `user:{user_id}` 房间，**不断开**连接。离线为 no-op，下次打开消息页 HTTP 拉列表/历史。
+
+```json
+{
+  "event": "chat.message",
+  "conversation": {
+    "id": 12,
+    "peer_user_id": 7,
+    "peer_display_id": "昵称",
+    "last_preview": "你好",
+    "last_message_at": "2026-08-31T00:00:00.000Z",
+    "last_sender_user_id": 3,
+    "unread_count": 1
+  },
+  "message": {
+    "id": 100,
+    "conversation_id": 12,
+    "sender_user_id": 3,
+    "body": "你好",
+    "created_at": "2026-08-31T00:00:00.000Z"
+  }
+}
+```
+
+`conversation` 是**接收方视角**（`peer_*` / `unread_count` 相对该房间的用户）。
+
 #### `binding.unbound`
 
 解绑踢 Redis session 之后推送（他机立刻解绑，或本机 2 小时到期）。payload：
@@ -2317,6 +2455,37 @@ ALTER TABLE users
 ALTER TABLE fingerprints DROP INDEX uk_fingerprints_hash;
 -- 可选，提升按指纹查询性能：
 -- ALTER TABLE fingerprints ADD INDEX idx_fingerprints_hash (fingerprint_hash);
+
+-- 一对一私聊
+-- 见 database/migrations/20260831_create_chat_tables.sql
+CREATE TABLE conversations (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  user_low INT NOT NULL,
+  user_high INT NOT NULL,
+  last_message_id BIGINT NULL,
+  last_sender_user_id INT NULL,
+  last_preview VARCHAR(120) NULL,
+  last_message_at TIMESTAMP NULL,
+  low_read_message_id BIGINT NOT NULL DEFAULT 0,
+  high_read_message_id BIGINT NOT NULL DEFAULT 0,
+  low_unread INT NOT NULL DEFAULT 0,
+  high_unread INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_conversations_pair (user_low, user_high)
+);
+
+CREATE TABLE messages (
+  id BIGINT NOT NULL AUTO_INCREMENT,
+  conversation_id BIGINT NOT NULL,
+  sender_user_id INT NOT NULL,
+  body VARCHAR(2000) NOT NULL,
+  client_msg_id VARCHAR(64) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_messages_client (conversation_id, sender_user_id, client_msg_id),
+  CONSTRAINT fk_messages_conversation FOREIGN KEY (conversation_id) REFERENCES conversations (id) ON DELETE CASCADE
+);
 ```
 
 历史迁移示例：

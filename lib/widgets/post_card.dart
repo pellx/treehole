@@ -12,6 +12,7 @@ import '../services/timezone_service.dart';
 import '../services/api.dart';
 import '../services/session_service.dart';
 import '../pages/account/register_page.dart';
+import '../pages/messages/chat_navigation.dart';
 import '../pages/settings/settings_navigation.dart';
 import '../widgets/app_bottom_sheet.dart';
 import '../widgets/app_snackbar.dart';
@@ -897,6 +898,10 @@ class _PostCardState extends State<PostCard> {
           GestureDetector(
             onTap: () {
               HapticFeedback.lightImpact();
+              openPrivateChat(context, comment.displayAuthor);
+            },
+            onLongPress: () {
+              HapticFeedback.lightImpact();
               setState(() {
                 _expandedAuthorId = isExpanded ? null : comment.id;
               });
@@ -1305,9 +1310,21 @@ class _TitleAuthorRow extends StatelessWidget {
                   style: titleStyle,
                 ),
                 SizedBox(width: AppDimens.paddingLg),
-                Text('@', style: atStyle),
-                SizedBox(width: AppDimens.authorAtGap),
-                Text(post.displayAuthor, style: authorStyle),
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    openPrivateChat(context, post.displayAuthor);
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('@', style: atStyle),
+                      SizedBox(width: AppDimens.authorAtGap),
+                      Text(post.displayAuthor, style: authorStyle),
+                    ],
+                  ),
+                ),
               ],
             )
           // 超宽
@@ -1336,17 +1353,24 @@ class _TitleAuthorRow extends StatelessWidget {
                     SizedBox(width: gap),
                     Flexible(
                       flex: (authorW / totalW * avail).round().clamp(1, 999),
-                      child: Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(text: '@', style: atStyle),
-                            TextSpan(
-                              text: post.displayAuthor,
-                              style: authorStyle,
-                            ),
-                          ],
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          openPrivateChat(context, post.displayAuthor);
+                        },
+                        child: Text.rich(
+                          TextSpan(
+                            children: [
+                              TextSpan(text: '@', style: atStyle),
+                              TextSpan(
+                                text: post.displayAuthor,
+                                style: authorStyle,
+                              ),
+                            ],
+                          ),
+                          softWrap: true,
                         ),
-                        softWrap: true,
                       ),
                     ),
                   ],
@@ -1384,6 +1408,32 @@ class _TitleAuthorRow extends StatelessWidget {
                           maxWidth:
                               AppDimens.titleAuthorMaxWidth - titleW - gap,
                         ),
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            openPrivateChat(context, post.displayAuthor);
+                          },
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(text: '@', style: atStyle),
+                                TextSpan(
+                                  text: post.displayAuthor,
+                                  style: authorStyle,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          openPrivateChat(context, post.displayAuthor);
+                        },
                         child: Text.rich(
                           TextSpan(
                             children: [
@@ -1394,18 +1444,6 @@ class _TitleAuthorRow extends StatelessWidget {
                               ),
                             ],
                           ),
-                        ),
-                      )
-                    else
-                      Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(text: '@', style: atStyle),
-                            TextSpan(
-                              text: post.displayAuthor,
-                              style: authorStyle,
-                            ),
-                          ],
                         ),
                       ),
                   ],
