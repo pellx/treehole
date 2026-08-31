@@ -14,13 +14,15 @@ import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_sms.dart';
 import 'captcha_view.dart';
 
-/// 手机号注册新账号页（官方「手机号登录」样式，从右侧滑入）。
+/// 手机号注册新账号页（官方「手机号登录」样式，系统默认路由推入）。
 ///
 /// 第一步输入手机号点「发送验证码」，出现验证码/昵称输入框后点
 /// 「验证并注册」进入内嵌验证，通过即自动提交。
 /// POST /user/sms/send (scene: register) → POST /user/sms/register；
 /// 一步完成建号 + 建绑（返回 user_token + device_secret），保留验证码 +
 /// PoW 防刷：PoW 页面加载时后台预取。成功后 pop(true)，由注册页收尾退出。
+///
+/// 样式集中在 SmsDimens（形状）与 SmsPageColors（颜色，亮/暗成对）。
 class SmsRegisterPage extends StatefulWidget {
   const SmsRegisterPage({super.key});
 
@@ -55,7 +57,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     _phoneController.addListener(() => _onTextChanged());
     _codeController.addListener(() => _onTextChanged());
     _nameController.addListener(() => _onTextChanged());
-    // 右侧滑入动画结束后再唤起键盘，避免转场与键盘动画打架
+    // 转场动画结束后再唤起键盘，避免转场与键盘动画打架
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await Future.delayed(const Duration(milliseconds: 350));
       if (mounted) _phoneFocusNode.requestFocus();
@@ -281,13 +283,13 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final colors = Theme.of(context).extension<AppColors>()!.smsPage;
 
     final phone = _phoneController.text.trim();
     final code = _codeController.text.trim();
     final name = _nameController.text.trim();
-    final canSend = _isValidPhone(phone) && !_sending && _cooldown == 0;
+    final canSend =
+        _isValidPhone(phone) && !_sending && _cooldown == 0;
     final enabled = _captchaPhase
         ? false
         : _codeSent
@@ -298,7 +300,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
             : canSend;
 
     return Scaffold(
-      backgroundColor: colors.common.surface,
+      backgroundColor: colors.pageBg,
       body: SafeArea(
         bottom: false,
         child: ListView(
@@ -311,14 +313,14 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
               child: IconButton(
                 onPressed: () => Navigator.of(context).maybePop(),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(
-                  width: 32,
-                  height: 36,
+                constraints: BoxConstraints.tightFor(
+                  width: SmsDimens.backTapWidth,
+                  height: SmsDimens.backTapHeight,
                 ),
                 icon: Icon(
                   Icons.arrow_back_ios_new,
                   size: SmsDimens.backIconSize,
-                  color: onSurface,
+                  color: colors.title,
                 ),
               ),
             ),
@@ -327,8 +329,8 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
               '注册新账号',
               style: TextStyle(
                 fontSize: SmsDimens.titleFontSize,
-                fontWeight: FontWeight.bold,
-                color: onSurface,
+                fontWeight: SmsDimens.titleFontWeight,
+                color: colors.title,
               ),
             ),
             const SizedBox(height: SmsDimens.subtitleTopGap),
@@ -337,19 +339,19 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
               style: TextStyle(
                 fontSize: SmsDimens.subtitleFontSize,
                 height: SmsDimens.subtitleLineHeight,
-                color: onSurface.withValues(alpha: SmsDimens.subtitleAlpha),
+                color: colors.subtitle,
               ),
             ),
             const SizedBox(height: SmsDimens.formTopGap),
             if (_captchaPhase)
-              _buildCaptchaContent(colors, onSurface)
+              _buildCaptchaContent(colors)
             else ...[
-              _buildPhoneBox(onSurface),
+              _buildPhoneBox(colors),
               if (_codeSent) ...[
                 const SizedBox(height: SmsDimens.fieldGap),
-                _buildCodeBox(colors, onSurface),
+                _buildCodeBox(colors),
                 const SizedBox(height: SmsDimens.fieldGap),
-                _buildNameBox(onSurface),
+                _buildNameBox(colors),
               ],
               const SizedBox(height: SmsDimens.buttonTopGap),
               _buildPrimaryButton(
@@ -364,7 +366,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
                 _error!,
                 style: TextStyle(
                   fontSize: SmsDimens.errorFontSize,
-                  color: colors.register.errorText,
+                  color: colors.error,
                 ),
               ),
             ],
@@ -375,14 +377,15 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
   }
 
   /// 圆角描边输入框容器
-  Widget _buildBox(Color onSurface, {required Widget child}) {
+  Widget _buildBox(SmsPageColors colors, {required Widget child}) {
     return Container(
       height: SmsDimens.boxHeight,
       padding: const EdgeInsets.symmetric(horizontal: SmsDimens.boxHPadding),
       decoration: BoxDecoration(
+        color: colors.boxBg,
         borderRadius: BorderRadius.circular(SmsDimens.boxRadius),
         border: Border.all(
-          color: onSurface.withValues(alpha: SmsDimens.boxBorderAlpha),
+          color: colors.boxBorder,
           width: SmsDimens.boxBorderWidth,
         ),
       ),
@@ -390,29 +393,29 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     );
   }
 
-  Widget _buildPhoneBox(Color onSurface) {
+  Widget _buildPhoneBox(SmsPageColors colors) {
     return _buildBox(
-      onSurface,
+      colors,
       child: Row(
         children: [
           Text(
             '+86',
             style: TextStyle(
               fontSize: SmsDimens.prefixFontSize,
-              fontWeight: FontWeight.w600,
-              color: onSurface,
+              fontWeight: SmsDimens.prefixFontWeight,
+              color: colors.fieldText,
             ),
           ),
           Icon(
             Icons.expand_more,
             size: SmsDimens.prefixIconSize,
-            color: onSurface.withValues(alpha: 0.6),
+            color: colors.prefixIcon,
           ),
           const SizedBox(width: SmsDimens.prefixGap),
           Container(
-            width: 1,
-            height: 18,
-            color: onSurface.withValues(alpha: SmsDimens.boxBorderAlpha),
+            width: SmsDimens.dividerWidth,
+            height: SmsDimens.dividerHeight,
+            color: colors.boxBorder,
           ),
           const SizedBox(width: SmsDimens.dividerGap),
           Expanded(
@@ -426,16 +429,16 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
               ],
               style: TextStyle(
                 fontSize: SmsDimens.fieldFontSize,
-                color: onSurface,
+                color: colors.fieldText,
               ),
-              cursorColor: onSurface,
+              cursorColor: colors.fieldText,
               decoration: InputDecoration(
                 isCollapsed: true,
                 border: InputBorder.none,
                 hintText: '请输入手机号',
                 hintStyle: TextStyle(
                   fontSize: SmsDimens.fieldFontSize,
-                  color: onSurface.withValues(alpha: SmsDimens.hintAlpha),
+                  color: colors.hintText,
                 ),
               ),
             ),
@@ -445,9 +448,9 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     );
   }
 
-  Widget _buildCodeBox(AppColors colors, Color onSurface) {
+  Widget _buildCodeBox(SmsPageColors colors) {
     return _buildBox(
-      onSurface,
+      colors,
       child: Row(
         children: [
           Expanded(
@@ -461,16 +464,16 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
               ],
               style: TextStyle(
                 fontSize: SmsDimens.fieldFontSize,
-                color: onSurface,
+                color: colors.fieldText,
               ),
-              cursorColor: onSurface,
+              cursorColor: colors.fieldText,
               decoration: InputDecoration(
                 isCollapsed: true,
                 border: InputBorder.none,
                 hintText: '请输入验证码',
                 hintStyle: TextStyle(
                   fontSize: SmsDimens.fieldFontSize,
-                  color: onSurface.withValues(alpha: SmsDimens.hintAlpha),
+                  color: colors.hintText,
                 ),
               ),
             ),
@@ -485,16 +488,16 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
                   },
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 8,
+                horizontal: SmsDimens.suffixHPadding,
+                vertical: SmsDimens.suffixVPadding,
               ),
               child: Text(
                 _cooldown > 0 ? '重新发送 $_cooldown s' : '重新发送',
                 style: TextStyle(
                   fontSize: SmsDimens.suffixFontSize,
                   color: _cooldown > 0
-                      ? onSurface.withValues(alpha: 0.35)
-                      : colors.postCreate.submitBg,
+                      ? colors.suffixDisabled
+                      : colors.suffixLink,
                 ),
               ),
             ),
@@ -504,26 +507,26 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     );
   }
 
-  Widget _buildNameBox(Color onSurface) {
+  Widget _buildNameBox(SmsPageColors colors) {
     return _buildBox(
-      onSurface,
+      colors,
       child: Center(
         child: TextField(
           controller: _nameController,
           maxLength: 100,
           style: TextStyle(
             fontSize: SmsDimens.fieldFontSize,
-            color: onSurface,
+            color: colors.fieldText,
           ),
-          cursorColor: onSurface,
+          cursorColor: colors.fieldText,
           decoration: InputDecoration(
             isCollapsed: true,
             border: InputBorder.none,
             counterText: '',
             hintText: '请输入名字（每14天可更改一次）',
             hintStyle: TextStyle(
-              fontSize: SmsDimens.fieldFontSize - 2,
-              color: onSurface.withValues(alpha: SmsDimens.hintAlpha),
+              fontSize: SmsDimens.nameHintFontSize,
+              color: colors.hintText,
             ),
           ),
         ),
@@ -532,7 +535,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
   }
 
   Widget _buildPrimaryButton(
-    AppColors colors,
+    SmsPageColors colors,
     String label,
     VoidCallback? onPressed,
   ) {
@@ -542,11 +545,10 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: colors.postCreate.submitBg,
-          foregroundColor: colors.postCreate.submitText,
-          disabledBackgroundColor:
-              colors.postCreate.submitBg.withValues(alpha: 0.4),
-          disabledForegroundColor: colors.postCreate.submitText,
+          backgroundColor: colors.buttonBg,
+          foregroundColor: colors.buttonText,
+          disabledBackgroundColor: colors.buttonBg.withValues(alpha: 0.4),
+          disabledForegroundColor: colors.buttonText,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(SmsDimens.buttonRadius),
@@ -558,8 +560,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
                 height: SmsDimens.buttonSpinnerSize,
                 child: CircularProgressIndicator(
                   strokeWidth: SmsDimens.buttonSpinnerStroke,
-                  valueColor:
-                      AlwaysStoppedAnimation(colors.postCreate.submitText),
+                  valueColor: AlwaysStoppedAnimation(colors.buttonText),
                 ),
               )
             : Text(
@@ -574,7 +575,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
   }
 
   /// 验证码阶段：提示 + 内嵌阿里云点击验证，通过后自动提交
-  Widget _buildCaptchaContent(AppColors colors, Color onSurface) {
+  Widget _buildCaptchaContent(SmsPageColors colors) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -582,7 +583,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
           '完成验证后将自动提交',
           style: TextStyle(
             fontSize: SmsDimens.subtitleFontSize,
-            color: onSurface.withValues(alpha: SmsDimens.subtitleAlpha),
+            color: colors.subtitle,
           ),
         ),
         const SizedBox(height: SmsDimens.fieldGap),

@@ -247,6 +247,41 @@ class RegisterColors {
   });
 }
 
+// ---- SmsPageColors ----
+
+/// 手机号验证码页（sms_login / sms_register）配色
+class SmsPageColors {
+  final Color pageBg;
+  final Color title;
+  final Color subtitle;
+  final Color boxBg;
+  final Color boxBorder;
+  final Color fieldText;
+  final Color hintText;
+  final Color prefixIcon;
+  final Color suffixLink;
+  final Color suffixDisabled;
+  final Color buttonBg;
+  final Color buttonText;
+  final Color error;
+
+  const SmsPageColors({
+    required this.pageBg,
+    required this.title,
+    required this.subtitle,
+    required this.boxBg,
+    required this.boxBorder,
+    required this.fieldText,
+    required this.hintText,
+    required this.prefixIcon,
+    required this.suffixLink,
+    required this.suffixDisabled,
+    required this.buttonBg,
+    required this.buttonText,
+    required this.error,
+  });
+}
+
 // ============================================================
 //  AppColors — 主题扩展
 // ============================================================
@@ -256,6 +291,7 @@ class AppColors extends ThemeExtension<AppColors> {
   final PostCreateColors postCreate;
   final VersionCardColors versionCard;
   final RegisterColors register;
+  final SmsPageColors smsPage;
 
   const AppColors({
     required this.common,
@@ -263,6 +299,7 @@ class AppColors extends ThemeExtension<AppColors> {
     required this.postCreate,
     required this.versionCard,
     required this.register,
+    required this.smsPage,
   });
 
   @override
@@ -272,6 +309,7 @@ class AppColors extends ThemeExtension<AppColors> {
     PostCreateColors? postCreate,
     VersionCardColors? versionCard,
     RegisterColors? register,
+    SmsPageColors? smsPage,
   }) {
     return AppColors(
       common: common ?? this.common,
@@ -279,6 +317,7 @@ class AppColors extends ThemeExtension<AppColors> {
       postCreate: postCreate ?? this.postCreate,
       versionCard: versionCard ?? this.versionCard,
       register: register ?? this.register,
+      smsPage: smsPage ?? this.smsPage,
     );
   }
 
@@ -291,6 +330,7 @@ class AppColors extends ThemeExtension<AppColors> {
       postCreate: t < 0.5 ? postCreate : other.postCreate,
       versionCard: t < 0.5 ? versionCard : other.versionCard,
       register: t < 0.5 ? register : other.register,
+      smsPage: t < 0.5 ? smsPage : other.smsPage,
     );
   }
 
@@ -540,12 +580,45 @@ static const registerDark = RegisterColors(
   loginRecoverColor: Color(0xFF90CAF9),
 );
 
+static const smsLight = SmsPageColors(
+  pageBg:         Color(0xFFFFFFFF),
+  title:          Color(0xFF333333),
+  subtitle:       Color(0x73333333),
+  boxBg:          Color(0xFFFFFFFF),
+  boxBorder:      Color(0x40333333),
+  fieldText:      Color(0xFF333333),
+  hintText:       Color(0x59333333),
+  prefixIcon:     Color(0x99333333),
+  suffixLink:     Color(0xFF00CC62),
+  suffixDisabled: Color(0x59333333),
+  buttonBg:       Color(0xFF00CC62),
+  buttonText:     Color(0xFFFFFFFF),
+  error:          Color(0xFFFF0000),
+);
+
+static const smsDark = SmsPageColors(
+  pageBg:         Color(0xFF222222),
+  title:          Color(0xFFd3d3d3),
+  subtitle:       Color(0x73d3d3d3),
+  boxBg:          Color(0xFF222222),
+  boxBorder:      Color(0x40d3d3d3),
+  fieldText:      Color(0xFFd3d3d3),
+  hintText:       Color(0x59d3d3d3),
+  prefixIcon:     Color(0x99d3d3d3),
+  suffixLink:     Color(0xFF12B460),
+  suffixDisabled: Color(0x59d3d3d3),
+  buttonBg:       Color(0xFF12B460),
+  buttonText:     Color(0xFFEFEFEF),
+  error:          Color(0xFFFF0400),
+);
+
 static const light = AppColors(
   common: commonLight,
   postCard: postCardLight,
   postCreate: postCreateLight,
   versionCard: versionCardLight,
   register: registerLight,
+  smsPage: smsLight,
 );
 
 static const dark = AppColors(
@@ -554,5 +627,6 @@ static const dark = AppColors(
   postCreate: postCreateDark,
   versionCard: versionCardDark,
   register: registerDark,
+  smsPage: smsDark,
 );
 }

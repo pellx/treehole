@@ -11,12 +11,14 @@ import '../../services/storage.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_sms.dart';
 
-/// 手机号找回页（官方「手机号登录」样式，从右侧滑入）。
+/// 手机号找回页（官方「手机号登录」样式，系统默认路由推入）。
 ///
 /// 第一步输入手机号点「发送验证码」，出现验证码输入框后点「验证并找回」。
 /// POST /user/sms/send (scene: login) → POST /user/sms/login；
 /// 服务端按手机号定位账户（未注册手机号走指纹找回路径），直接签发 session。
 /// 成功后 pop(true)，由注册页收尾退出。
+///
+/// 样式集中在 SmsDimens（形状）与 SmsPageColors（颜色，亮/暗成对）。
 class SmsLoginPage extends StatefulWidget {
   const SmsLoginPage({super.key});
 
@@ -48,7 +50,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     _codeController.addListener(() {
       if (mounted) setState(() {});
     });
-    // 右侧滑入动画结束后再唤起键盘，避免转场与键盘动画打架
+    // 转场动画结束后再唤起键盘，避免转场与键盘动画打架
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await Future.delayed(const Duration(milliseconds: 350));
       if (mounted) _phoneFocusNode.requestFocus();
@@ -208,18 +210,18 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
-    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final colors = Theme.of(context).extension<AppColors>()!.smsPage;
 
     final phone = _phoneController.text.trim();
     final code = _codeController.text.trim();
-    final canSend = _isValidPhone(phone) && !_sending && _cooldown == 0;
+    final canSend =
+        _isValidPhone(phone) && !_sending && _cooldown == 0;
     final enabled = _codeSent
         ? _isValidPhone(phone) && code.isNotEmpty && !_submitting
         : canSend;
 
     return Scaffold(
-      backgroundColor: colors.common.surface,
+      backgroundColor: colors.pageBg,
       body: SafeArea(
         bottom: false,
         child: ListView(
@@ -232,14 +234,14 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
               child: IconButton(
                 onPressed: () => Navigator.of(context).maybePop(),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints.tightFor(
-                  width: 32,
-                  height: 36,
+                constraints: BoxConstraints.tightFor(
+                  width: SmsDimens.backTapWidth,
+                  height: SmsDimens.backTapHeight,
                 ),
                 icon: Icon(
                   Icons.arrow_back_ios_new,
                   size: SmsDimens.backIconSize,
-                  color: onSurface,
+                  color: colors.title,
                 ),
               ),
             ),
@@ -248,8 +250,8 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
               '找回原用户',
               style: TextStyle(
                 fontSize: SmsDimens.titleFontSize,
-                fontWeight: FontWeight.bold,
-                color: onSurface,
+                fontWeight: SmsDimens.titleFontWeight,
+                color: colors.title,
               ),
             ),
             const SizedBox(height: SmsDimens.subtitleTopGap),
@@ -259,14 +261,14 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
               style: TextStyle(
                 fontSize: SmsDimens.subtitleFontSize,
                 height: SmsDimens.subtitleLineHeight,
-                color: onSurface.withValues(alpha: SmsDimens.subtitleAlpha),
+                color: colors.subtitle,
               ),
             ),
             const SizedBox(height: SmsDimens.formTopGap),
-            _buildPhoneBox(onSurface),
+            _buildPhoneBox(colors),
             if (_codeSent) ...[
               const SizedBox(height: SmsDimens.fieldGap),
-              _buildCodeBox(colors, onSurface),
+              _buildCodeBox(colors),
             ],
             const SizedBox(height: SmsDimens.buttonTopGap),
             _buildPrimaryButton(
@@ -280,7 +282,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                 _error!,
                 style: TextStyle(
                   fontSize: SmsDimens.errorFontSize,
-                  color: colors.register.errorText,
+                  color: colors.error,
                 ),
               ),
             ],
@@ -291,14 +293,15 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
   }
 
   /// 圆角描边输入框容器
-  Widget _buildBox(Color onSurface, {required Widget child}) {
+  Widget _buildBox(SmsPageColors colors, {required Widget child}) {
     return Container(
       height: SmsDimens.boxHeight,
       padding: const EdgeInsets.symmetric(horizontal: SmsDimens.boxHPadding),
       decoration: BoxDecoration(
+        color: colors.boxBg,
         borderRadius: BorderRadius.circular(SmsDimens.boxRadius),
         border: Border.all(
-          color: onSurface.withValues(alpha: SmsDimens.boxBorderAlpha),
+          color: colors.boxBorder,
           width: SmsDimens.boxBorderWidth,
         ),
       ),
@@ -306,29 +309,29 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     );
   }
 
-  Widget _buildPhoneBox(Color onSurface) {
+  Widget _buildPhoneBox(SmsPageColors colors) {
     return _buildBox(
-      onSurface,
+      colors,
       child: Row(
         children: [
           Text(
             '+86',
             style: TextStyle(
               fontSize: SmsDimens.prefixFontSize,
-              fontWeight: FontWeight.w600,
-              color: onSurface,
+              fontWeight: SmsDimens.prefixFontWeight,
+              color: colors.fieldText,
             ),
           ),
           Icon(
             Icons.expand_more,
             size: SmsDimens.prefixIconSize,
-            color: onSurface.withValues(alpha: 0.6),
+            color: colors.prefixIcon,
           ),
           const SizedBox(width: SmsDimens.prefixGap),
           Container(
-            width: 1,
-            height: 18,
-            color: onSurface.withValues(alpha: SmsDimens.boxBorderAlpha),
+            width: SmsDimens.dividerWidth,
+            height: SmsDimens.dividerHeight,
+            color: colors.boxBorder,
           ),
           const SizedBox(width: SmsDimens.dividerGap),
           Expanded(
@@ -342,16 +345,16 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
               ],
               style: TextStyle(
                 fontSize: SmsDimens.fieldFontSize,
-                color: onSurface,
+                color: colors.fieldText,
               ),
-              cursorColor: onSurface,
+              cursorColor: colors.fieldText,
               decoration: InputDecoration(
                 isCollapsed: true,
                 border: InputBorder.none,
                 hintText: '请输入手机号',
                 hintStyle: TextStyle(
                   fontSize: SmsDimens.fieldFontSize,
-                  color: onSurface.withValues(alpha: SmsDimens.hintAlpha),
+                  color: colors.hintText,
                 ),
               ),
             ),
@@ -361,9 +364,9 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     );
   }
 
-  Widget _buildCodeBox(AppColors colors, Color onSurface) {
+  Widget _buildCodeBox(SmsPageColors colors) {
     return _buildBox(
-      onSurface,
+      colors,
       child: Row(
         children: [
           Expanded(
@@ -377,16 +380,16 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
               ],
               style: TextStyle(
                 fontSize: SmsDimens.fieldFontSize,
-                color: onSurface,
+                color: colors.fieldText,
               ),
-              cursorColor: onSurface,
+              cursorColor: colors.fieldText,
               decoration: InputDecoration(
                 isCollapsed: true,
                 border: InputBorder.none,
                 hintText: '请输入验证码',
                 hintStyle: TextStyle(
                   fontSize: SmsDimens.fieldFontSize,
-                  color: onSurface.withValues(alpha: SmsDimens.hintAlpha),
+                  color: colors.hintText,
                 ),
               ),
             ),
@@ -401,16 +404,16 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                   },
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 8,
+                horizontal: SmsDimens.suffixHPadding,
+                vertical: SmsDimens.suffixVPadding,
               ),
               child: Text(
                 _cooldown > 0 ? '重新发送 $_cooldown s' : '重新发送',
                 style: TextStyle(
                   fontSize: SmsDimens.suffixFontSize,
                   color: _cooldown > 0
-                      ? onSurface.withValues(alpha: 0.35)
-                      : colors.postCreate.submitBg,
+                      ? colors.suffixDisabled
+                      : colors.suffixLink,
                 ),
               ),
             ),
@@ -420,18 +423,21 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     );
   }
 
-  Widget _buildPrimaryButton(AppColors colors, String label, VoidCallback? onPressed) {
+  Widget _buildPrimaryButton(
+    SmsPageColors colors,
+    String label,
+    VoidCallback? onPressed,
+  ) {
     return SizedBox(
       width: double.infinity,
       height: SmsDimens.buttonHeight,
       child: ElevatedButton(
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
-          backgroundColor: colors.postCreate.submitBg,
-          foregroundColor: colors.postCreate.submitText,
-          disabledBackgroundColor:
-              colors.postCreate.submitBg.withValues(alpha: 0.4),
-          disabledForegroundColor: colors.postCreate.submitText,
+          backgroundColor: colors.buttonBg,
+          foregroundColor: colors.buttonText,
+          disabledBackgroundColor: colors.buttonBg.withValues(alpha: 0.4),
+          disabledForegroundColor: colors.buttonText,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(SmsDimens.buttonRadius),
@@ -443,8 +449,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
                 height: SmsDimens.buttonSpinnerSize,
                 child: CircularProgressIndicator(
                   strokeWidth: SmsDimens.buttonSpinnerStroke,
-                  valueColor:
-                      AlwaysStoppedAnimation(colors.postCreate.submitText),
+                  valueColor: AlwaysStoppedAnimation(colors.buttonText),
                 ),
               )
             : Text(

@@ -10,7 +10,6 @@ import '../../services/device_fingerprint.dart';
 import '../../services/pow.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
-import '../settings/settings_navigation.dart';
 import 'captcha_view.dart';
 import 'sms_login_page.dart';
 import 'sms_register_page.dart';
