@@ -15,9 +15,9 @@ import '../../theme/app_dimens_sms.dart';
 /// 第一步输入手机号点「发送验证码」——请求携带设备指纹，服务端判定并
 /// 返回模式，第二步按模式提交：
 ///   login    手机号已注册 → 验证并登录（/user/sms/login）
-///   recover  未注册，绑定到本机主设备账户后登录（/user/sms/login 找回路径）
 ///   register 注册新账户（/user/sms/register，手机号绑定到新账户、
 ///            主设备为本机），仅此模式需要填写昵称
+/// 绑定到本机主设备账户的找回在「找回原用户」页的链路进行。
 /// 成功后 pop(true)，由注册页收尾退出。
 ///
 /// 样式集中在 SmsDimens（形状）与 SmsPageColors（颜色，亮/暗成对）。
@@ -41,7 +41,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
   int _cooldown = 0;
   String? _error;
 
-  /// 发送时服务端判定的模式：login | recover | register
+  /// 发送时服务端判定的模式：login | register
   String? _mode;
 
   /// 发送时采集的硬件指纹 hash（提交 login 时复用）
@@ -138,8 +138,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     }
   }
 
-  /// 按模式提交：register → sms/register；login/recover → sms/login
-  ///（recover 的手机号绑定由 sms/login 找回路径完成）
+  /// 按模式提交：register → sms/register；login → sms/login
   Future<void> _submit() async {
     final phone = _phoneController.text.trim();
     final code = _codeController.text.trim();
@@ -213,8 +212,8 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     Navigator.of(context).pop(true);
   }
 
-  /// login/recover 模式：短信登录（recover 时服务端找回路径先绑定手机号）。
-  /// 指纹 hash 复用发送时采集的值（同机同会话，结果一致）
+  /// login 模式：短信登录。指纹 hash 复用发送时采集的值（同机同会话，
+  /// 结果一致）
   Future<void> _submitLogin(String phone, String code) async {
     final hash = _fingerprintHash ??
         SessionService.computeFingerprintHash(
@@ -307,8 +306,6 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     switch (_mode) {
       case 'login':
         return '该手机号已注册，验证后将登录';
-      case 'recover':
-        return '验证后将绑定到本机账户并登录';
       case 'register':
         return '该手机号未注册，验证后将注册新账号';
       default:

@@ -359,10 +359,11 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 **模式判定（携带 `fingerprint_hash` 时）**：响应额外返回 `mode` 字段，客户端据此
 决定验证后的提交接口：
 - `login`：手机号已注册 → 提交 `/user/sms/login` 直接登录
-- `recover`：手机号未注册，且以本机为主设备的账户未绑手机号 → 提交 `/user/sms/login`，
-  其找回路径把该手机号绑定到本机账户后登录
-- `register`：手机号未注册，本机主设备账户已绑手机号（或无法识别本机账户）→
-  提交 `/user/sms/register` 注册新账户（手机号绑定到新账户，主设备为本机）
+- `register`：手机号未注册 → 提交 `/user/sms/register` 注册新账户（手机号绑定到
+  新账户，主设备为本机）
+
+绑定到本机主设备账户的找回不在本接口判定，由「找回原用户」链路的
+`/user/sms/login` 找回路径处理。
 
 阿里云发送场景随模式选择（login/recover → `login`，register → `register`），
 与后续校验接口的 scene 一致。
@@ -381,7 +382,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 ```
 
 若处于冷却期：`sent: false`，`cooldown_seconds` 为剩余秒数。`mode` 仅在携带
-`fingerprint_hash` 时返回，取值 `login` / `recover` / `register`。
+`fingerprint_hash` 时返回，取值 `login` / `register`。
 
 **错误**
 
