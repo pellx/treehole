@@ -21,7 +21,7 @@ class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   final _homeKey = GlobalKey<SquarePageState>();
   final _favoritesKey = GlobalKey();
-  final _messagesKey = GlobalKey<MessagesPageState>();
+  final _messagesKey = GlobalKey();
   final _userKey = GlobalKey();
 
   static const _labels = ['广场', '收藏', '消息', '我的'];
@@ -42,9 +42,6 @@ class _MainShellState extends State<MainShell> {
     if (index != _currentIndex) {
       HapticFeedback.lightImpact();
       setState(() => _currentIndex = index);
-      if (index == 2) {
-        _messagesKey.currentState?.onBecameVisible();
-      }
     }
   }
 

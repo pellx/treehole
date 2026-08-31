@@ -30,7 +30,6 @@ class DeviceCredentialStore {
   /// 各账户最近一次成功建 session 的时间（仅排序用，不存 secret）
   /// `{ user_token: { last_session_at: ISO8601 } }`
   static const _kAccountSessionMeta = 'account_session_meta';
-  static const _kUserId = 'user_id';
 
   /// 保存注册时使用的设备指纹数据（JSON），用于后续 session 创建时不因设备状态变化导致指纹不匹配
   static Future<void> saveRegisteredFingerprint(String fpJson) async {
@@ -92,22 +91,6 @@ class DeviceCredentialStore {
 
   static Future<void> saveSessionSecret(String secret) async {
     await _storage.write(key: _kSessionSecret, value: secret);
-  }
-
-  // ── user_id（session/validate 返回，私聊区分自己/对方）──
-
-  static Future<int?> getUserId() async {
-    final raw = await _storage.read(key: _kUserId);
-    if (raw == null) return null;
-    return int.tryParse(raw);
-  }
-
-  static Future<void> saveUserId(int id) async {
-    await _storage.write(key: _kUserId, value: id.toString());
-  }
-
-  static Future<void> clearUserId() async {
-    await _storage.delete(key: _kUserId);
   }
 
   // ── fingerprint_hash ──
@@ -340,7 +323,6 @@ class DeviceCredentialStore {
     final token = await getUserExternalToken();
     await _storage.delete(key: _kSessionId);
     await _storage.delete(key: _kSessionSecret);
-    await _storage.delete(key: _kUserId);
     if (token != null) await removeAccountSession(token);
   }
 
@@ -350,7 +332,6 @@ class DeviceCredentialStore {
     await _storage.delete(key: _kUserExternalToken);
     await _storage.delete(key: _kSessionId);
     await _storage.delete(key: _kSessionSecret);
-    await _storage.delete(key: _kUserId);
     if (token != null) {
       await removeAccountSession(token);
       await removeAccountSessionMeta(token);
@@ -364,7 +345,6 @@ class DeviceCredentialStore {
     await _storage.delete(key: _kUserExternalToken);
     await _storage.delete(key: _kSessionId);
     await _storage.delete(key: _kSessionSecret);
-    await _storage.delete(key: _kUserId);
     await _storage.delete(key: _kFingerprintHash);
     await _storage.delete(key: _kKnownUserTokens);
     await _storage.delete(key: _kAccountSessions);

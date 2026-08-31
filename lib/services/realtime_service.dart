@@ -1,8 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
-import '../models/chat.dart';
-
 /// `binding.unbound` 推送摘要（含踢人设备，字段对齐 README 附录 E）
 class BindingUnboundInfo {
   final String reason;
@@ -110,7 +108,6 @@ class RealtimeService {
 
   void Function(BindingUnboundInfo? info)? onBindingUnbound;
   VoidCallback? onSessionInvalidated;
-  void Function(ChatRealtimePayload payload)? onChatMessage;
 
   /// UI：连接状态文案（未连接 / 连接中 / 已连接 / 错误…）
   final ValueNotifier<String> connectionLabel =
@@ -188,12 +185,6 @@ class RealtimeService {
       debugPrint('[Realtime] session.invalidated: $data');
       onSessionInvalidated?.call();
     });
-    socket.on('chat.message', (data) {
-      if (_connectedSessionId != boundSessionId) return;
-      final payload = _readChatPayload(data);
-      if (payload == null) return;
-      onChatMessage?.call(payload);
-    });
     socket.on('test.tick', (data) {
       if (_connectedSessionId != boundSessionId) return;
       final n = _readTickN(data);
@@ -269,24 +260,5 @@ class RealtimeService {
       if (raw is String && raw.isNotEmpty) return raw;
     }
     return null;
-  }
-
-  static ChatRealtimePayload? _readChatPayload(dynamic data) {
-    if (data is! Map) return null;
-    final map = Map<String, dynamic>.from(data);
-    final convRaw = map['conversation'];
-    final msgRaw = map['message'];
-    if (convRaw is! Map || msgRaw is! Map) return null;
-    try {
-      return ChatRealtimePayload(
-        conversation: ChatConversation.fromJson(
-          Map<String, dynamic>.from(convRaw),
-        ),
-        message: ChatMessage.fromJson(Map<String, dynamic>.from(msgRaw)),
-      );
-    } catch (e) {
-      debugPrint('[Realtime] chat.message parse: $e');
-      return null;
-    }
   }
 }

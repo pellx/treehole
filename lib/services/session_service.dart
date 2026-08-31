@@ -265,9 +265,6 @@ class SessionService {
           await DeviceCredentialStore.clearSession();
         } else {
           _lastValidatedAt = DateTime.now();
-          if (validateResult.userId != null) {
-            await DeviceCredentialStore.saveUserId(validateResult.userId!);
-          }
           return _ensureCurrentAccountBoundOnDevice(
             sessionId: sessionId,
             sessionSecret: sessionSecret,

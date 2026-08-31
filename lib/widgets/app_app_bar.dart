@@ -87,7 +87,6 @@ class AppScaffold extends StatelessWidget {
   final Widget body;
   final Widget? trailing;
   final bool resizeToAvoidBottomInset;
-  final bool automaticallyImplyLeading;
   final Color? backgroundColor;
   final VoidCallback? onBack;
 
@@ -97,7 +96,6 @@ class AppScaffold extends StatelessWidget {
     required this.body,
     this.trailing,
     this.resizeToAvoidBottomInset = true,
-    this.automaticallyImplyLeading = true,
     this.backgroundColor,
     this.onBack,
   });
@@ -110,12 +108,7 @@ class AppScaffold extends StatelessWidget {
           backgroundColor ?? Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
-          AppAppBar(
-            title: title,
-            trailing: trailing,
-            onBack: onBack,
-            automaticallyImplyLeading: automaticallyImplyLeading,
-          ),
+          AppAppBar(title: title, trailing: trailing, onBack: onBack),
           Expanded(child: body),
         ],
       ),
