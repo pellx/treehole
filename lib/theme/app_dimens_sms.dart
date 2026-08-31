@@ -12,7 +12,7 @@ class SmsDimens {
   static const double pageHPadding = 24;
   static const double backIconSize = 22;
   /// 返回按钮图标左缘距屏幕左缘的绝对距离（不受点击区宽度和页面边距影响）
-  static const double backIconLeftInset = 24;
+  static const double backIconLeftInset = 10;
   static const double backTapHeight = 36;
   static const double titleTopGap = 20;
   static const double titleFontSize = 30;
