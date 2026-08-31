@@ -206,6 +206,7 @@ class RegisterDimens {
   static const double deviceRegisteredButtonVOffset = 22;
   static const double deviceRegisteredButtonHOffset = 0;
   static const double deviceRegisteredButtonGap = 24;
+  static const double deviceRegisteredButtonPaddingH = 0;
   static const double deviceRegisteredButtonRadius = 13;
   static const double deviceRegisteredButtonBorderWidth = 3;
   static const double deviceRegisteredButtonFontSize = 16;
