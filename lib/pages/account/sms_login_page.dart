@@ -221,7 +221,6 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
       'USER_NOT_FOUND' => '该手机号未注册，且本机没有可找回的账户',
       'FINGERPRINT_MISMATCH' => '本机设备不在该账户的绑定范围内',
       'DEVICE_SESSION_LOCKED' => '本机切号锁定中（约 2 天），暂不可切换',
-      'DEVICE_NOT_PRIMARY' => '该账户的主设备不是本机，无法在此登录',
       'REBIND_COOLDOWN' => '解绑冷却中，请 2 天后再登录此账户',
       'TRANSFER_REQUIRED' => '需先在原设备发起转移申请（15 分钟内有效）',
       'TRANSFER_INVALID' => '转移申请无效或已过期，请在原设备重新申请',
