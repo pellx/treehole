@@ -12,7 +12,8 @@ import '../../services/session_service.dart';
 import '../../services/storage.dart';
 import '../settings/settings_navigation.dart';
 import 'captcha_view.dart';
-import 'device_registered_page.dart';
+import 'sms_login_page.dart';
+import 'sms_register_page.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_accent.dart';
 import '../../theme/app_dimens_register.dart';
@@ -28,7 +29,7 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  String _phase = 'checking'; // checking | failed | unregistered | registering | naming | login | done
+  String _phase = 'checking'; // checking | registered | failed | unregistered | registering | naming | login | done
   String? _error;
 
   DeviceFingerprint? _fingerprint;
@@ -110,6 +111,7 @@ class _RegisterPageState extends State<RegisterPage> {
           vOffset: RegisterDimens.trueVOffset,
           hOffset: RegisterDimens.trueHOffset,
         );
+      case 'registered':
       case 'failed':
         return (
           path: 'assets/mu/mu-flase.png',
@@ -151,6 +153,8 @@ class _RegisterPageState extends State<RegisterPage> {
         return '让我康康';
       case 'unregistered':
         return '您的设备可进行注册';
+      case 'registered':
+        return '该设备环境已注册';
       case 'failed':
         return '测试未通过，请重试';
       case 'registering':
@@ -185,14 +189,7 @@ class _RegisterPageState extends State<RegisterPage> {
         setState(() => _phase = 'failed');
         return;
       }
-      if (registered) {
-        // 设备环境已注册：替换为引导页（手机号找回 / 手机号注册）
-        await Navigator.of(context).pushReplacement(
-          bottomUpRoute<void>(const DeviceRegisteredPage()),
-        );
-        return;
-      }
-      setState(() => _phase = 'unregistered');
+      setState(() => _phase = registered ? 'registered' : 'unregistered');
     } catch (e) {
       if (mounted) setState(() => _phase = 'failed');
     }
@@ -516,6 +513,36 @@ class _RegisterPageState extends State<RegisterPage> {
                       color: onSurface,
                     )),
               ),
+            // 已注册 — 两个继续路径按钮（同一行）+ 下一行小字
+            if (_phase == 'registered') ...[
+              _offsetLayer(
+                vOffset: RegisterDimens.deviceRegisteredButtonVOffset,
+                hOffset: RegisterDimens.deviceRegisteredButtonHOffset,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildRegisteredButton(colors, '找回原用户', _openSmsLogin),
+                    SizedBox(
+                      width: RegisterDimens.deviceRegisteredButtonGap,
+                    ),
+                    _buildRegisteredButton(colors, '注册新账号', _openSmsRegister),
+                  ],
+                ),
+              ),
+              _offsetLayer(
+                vOffset: RegisterDimens.deviceRegisteredHintVOffset,
+                hOffset: RegisterDimens.deviceRegisteredHintHOffset,
+                child: Text(
+                  '如需帮助，请联系我们',
+                  style: TextStyle(
+                    fontSize: RegisterDimens.deviceRegisteredHintFontSize,
+                    color: onSurface.withValues(
+                      alpha: RegisterDimens.deviceRegisteredHintAlpha,
+                    ),
+                  ),
+                ),
+              ),
+            ],
             // 交互内容 — 按钮/输入框等
             if (_phase == 'unregistered' && _error == null)
               _offsetLayer(
@@ -653,9 +680,60 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
+  /// 已注册阶段：手机号找回 / 手机号注册新账号（bottom-up 子页）。
+  /// 子页 pop(true) 表示找回/注册成功，本页与 RegisterPage 其余流程一样
+  /// 直接退出回到进入前的页面；取消则停留在本阶段可换另一条路径。
+  Future<void> _openSmsLogin() async {
+    final ok =
+        await Navigator.of(context).push<bool>(bottomUpRoute<bool>(const SmsLoginPage()));
+    if (ok == true && mounted) Navigator.pop(context);
+  }
+
+  Future<void> _openSmsRegister() async {
+    final ok = await Navigator.of(context)
+        .push<bool>(bottomUpRoute<bool>(const SmsRegisterPage()));
+    if (ok == true && mounted) Navigator.pop(context);
+  }
+
+  /// 已注册阶段的两条路径按钮（与注册按钮同款式）
+  Widget _buildRegisteredButton(
+    AppColors colors,
+    String label,
+    VoidCallback onPressed,
+  ) {
+    return SizedBox(
+      width: RegisterDimens.deviceRegisteredButtonWidth,
+      height: RegisterDimens.deviceRegisteredButtonHeight,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: colors.register.buttonBg,
+          foregroundColor: colors.register.buttonText,
+          shape: RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(RegisterDimens.deviceRegisteredButtonRadius),
+            side: BorderSide(
+              color: colors.register.buttonBorderColor,
+              width: RegisterDimens.deviceRegisteredButtonBorderWidth,
+            ),
+          ),
+        ),
+        child: Text(label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: RegisterDimens.deviceRegisteredButtonFontSize,
+              fontWeight: FontWeight.w500,
+              letterSpacing: RegisterDimens.deviceRegisteredButtonLetterSpacing,
+            )),
+      ),
+    );
+  }
+
   Widget _buildPhase(AppColors colors, Color onSurface) {
     switch (_phase) {
       case 'checking':
+        return const SizedBox.shrink();
+      case 'registered':
         return const SizedBox.shrink();
       case 'failed':
         return const SizedBox.shrink();

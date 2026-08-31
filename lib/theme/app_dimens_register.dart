@@ -200,16 +200,18 @@ class RegisterDimens {
   static const double loginTransferTipAlpha = 0.45;
   static const double loginTransferTipLineHeight = 1.5;
 
-  // ── 设备已注册引导页（device_registered_page）──
-  static const double deviceRegisteredButtonWidth = 220;
+  // ── 已注册阶段（register_page registered：两个继续路径按钮同一行 + 下一行小字）──
+  static const double deviceRegisteredButtonWidth = 100;
   static const double deviceRegisteredButtonHeight = 40;
-  static const double deviceRegisteredButton1VOffset = 22;
-  static const double deviceRegisteredButton2VOffset = 76;
+  static const double deviceRegisteredButtonVOffset = 22;
+  static const double deviceRegisteredButtonHOffset = 0;
+  static const double deviceRegisteredButtonGap = 24;
   static const double deviceRegisteredButtonRadius = 13;
   static const double deviceRegisteredButtonBorderWidth = 3;
   static const double deviceRegisteredButtonFontSize = 16;
   static const double deviceRegisteredButtonLetterSpacing = 1;
-  static const double deviceRegisteredHintVOffset = 128;
+  static const double deviceRegisteredHintVOffset = 78;
+  static const double deviceRegisteredHintHOffset = 0;
   static const double deviceRegisteredHintFontSize = 12;
   static const double deviceRegisteredHintAlpha = 0.45;
 
