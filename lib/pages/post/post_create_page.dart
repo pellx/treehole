@@ -8,7 +8,9 @@ import 'package:flutter/services.dart';
 import '../../config/post_limits.dart';
 import '../../models/post.dart';
 import '../../models/post_draft.dart';
+import '../../widgets/app_confirm_dialog.dart';
 import '../../widgets/image_overlay.dart';
+import '../../widgets/live_pop_scope.dart';
 import '../../models/upload_result.dart';
 import '../../services/api.dart';
 import '../../services/session_service.dart';
@@ -83,6 +85,7 @@ class _PostCreatePageState extends State<PostCreatePage>
   void initState() {
     super.initState();
     SessionService.instance.ensureSession();
+    _restoreDraftFromStorage();
     _contentExpandCtrl =
         AnimationController(
           vsync: this,
@@ -411,6 +414,8 @@ class _PostCreatePageState extends State<PostCreatePage>
       return;
     }
     HapticFeedback.mediumImpact();
+    await PostStorage.clearPostDraft();
+    if (!mounted) return;
     Navigator.pop(context, true);
   }
 
@@ -430,6 +435,191 @@ class _PostCreatePageState extends State<PostCreatePage>
     setState(() {});
   }
 
+  // ---- 退出与本地暂存草稿 ----
+
+  bool _exitPromptShowing = false;
+
+  /// 有未提交的输入内容（标题/正文/图片/附件任一）即视为可暂存
+  bool get _hasDraftContent =>
+      _titleController.text.trim().isNotEmpty ||
+      _contentController.text.trim().isNotEmpty ||
+      _images.isNotEmpty ||
+      _attachment != null;
+
+  Map<String, dynamic> _draftToMap() => {
+    'title': _titleController.text,
+    'content': _contentController.text,
+    'has_author': _hasAuthor,
+    'images': _images
+        .map((e) => {'path': e.path, 'name': e.name, 'bytes': e.bytes})
+        .toList(),
+    'attachment': _attachment == null
+        ? null
+        : {
+            'path': _attachment!.path,
+            'name': _attachment!.name,
+            'bytes': _attachment!.bytes,
+          },
+    // 发布时用的是上传结果而非本地文件，必须一并暂存
+    'uploaded_images': _uploadedImages.map((e) => e.toJson()).toList(),
+    'uploaded_attachment': _uploadedAttachment?.toJson(),
+  };
+
+  void _restoreDraftFromStorage() {
+    final draft = PostStorage.getPostDraft();
+    if (draft == null) return;
+    final title = (draft['title'] ?? '') as String;
+    final content = (draft['content'] ?? '') as String;
+    final images = <_PickedFile>[];
+    for (final raw in (draft['images'] as List? ?? const [])) {
+      final map = Map<String, dynamic>.from(raw as Map);
+      if (File(map['path'] as String).existsSync()) {
+        images.add(
+          _PickedFile(
+            path: map['path'] as String,
+            name: map['name'] as String,
+            bytes: (map['bytes'] ?? 0) as int,
+          ),
+        );
+      }
+    }
+    final attRaw = draft['attachment'] as Map?;
+    _PickedFile? attachment;
+    if (attRaw != null) {
+      final map = Map<String, dynamic>.from(attRaw);
+      if (File(map['path'] as String).existsSync()) {
+        attachment = _PickedFile(
+          path: map['path'] as String,
+          name: map['name'] as String,
+          bytes: (map['bytes'] ?? 0) as int,
+        );
+      }
+    }
+    if (title.isEmpty &&
+        content.isEmpty &&
+        images.isEmpty &&
+        attachment == null) {
+      return;
+    }
+    _titleController.text = title;
+    _contentController.text = content;
+    _hasAuthor = (draft['has_author'] ?? false) as bool;
+    _images.addAll(images);
+    _previewKeys = List.generate(_images.length, (_) => GlobalKey());
+    _attachment = attachment;
+
+    // 恢复已上传结果：按文件名与本地文件配对，避免发布时丢图
+    final uploadedByName = <String, UploadResult>{};
+    for (final raw in (draft['uploaded_images'] as List? ?? const [])) {
+      final result = UploadResult.fromJson(
+        Map<String, dynamic>.from(raw as Map),
+      );
+      uploadedByName[result.filename] = result;
+    }
+    for (final img in images) {
+      final result = uploadedByName[img.name];
+      if (result != null) _uploadedImages.add(result);
+    }
+    final attUpRaw = draft['uploaded_attachment'] as Map?;
+    if (attUpRaw != null && attachment != null) {
+      final result = UploadResult.fromJson(Map<String, dynamic>.from(attUpRaw));
+      if (result.filename == attachment.name) _uploadedAttachment = result;
+    }
+
+    // 配不上的（如旧版本草稿没存上传结果）→ 进入页面后自动补传
+    final orphanImages = images
+        .where((img) => !_uploadedImages.any((r) => r.filename == img.name))
+        .toList();
+    final orphanAttachment = attachment != null && _uploadedAttachment == null
+        ? attachment
+        : null;
+    if (orphanImages.isNotEmpty || orphanAttachment != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _reuploadRestored(orphanImages, orphanAttachment);
+      });
+    }
+  }
+
+  /// 补传恢复草稿时缺失上传结果的文件（复用选图后的上传状态展示）
+  Future<void> _reuploadRestored(
+    List<_PickedFile> images,
+    _PickedFile? attachment,
+  ) async {
+    setState(() {
+      _fileState = false;
+      _uploading = true;
+      _errorMessage = null;
+    });
+    final userId = _hasAuthor ? _userName : null;
+    final futures = <Future<UploadResult?>>[
+      for (final img in images)
+        ApiService.uploadFile(
+          PostUploadType.image,
+          File(img.path),
+          userId: userId,
+        ),
+      if (attachment != null)
+        ApiService.uploadFile(
+          PostUploadType.attachment,
+          File(attachment.path),
+          userId: userId,
+        ),
+    ];
+    final results = await Future.wait(futures);
+    if (!mounted) return;
+    final failed = results.any((e) => e == null);
+    if (failed) {
+      setState(() => _uploading = false);
+      _setError(getModerationMessage(ApiService.lastError ?? '上传失败，请重试'));
+      return;
+    }
+    setState(() {
+      _uploading = false;
+      for (final r in results.whereType<UploadResult>()) {
+        if (r.type == PostUploadType.image) {
+          _uploadedImages.add(r);
+        } else {
+          _uploadedAttachment = r;
+        }
+      }
+      _fileState = true;
+    });
+  }
+
+  /// 退出意图统一入口：返回手势、返回键、顶栏关闭按钮都走这里。
+  /// 预览打开 → 先关预览；编辑器展开 → 先收起；有未提交内容 → 询问暂存。
+  Future<void> _handleExitIntent() async {
+    if (ImageOverlay.currentEntry != null) {
+      ImageOverlay.closeCurrent();
+      return;
+    }
+    if (_contentExpandCtrl.isCompleted) {
+      _closeContentEditor();
+      return;
+    }
+    if (_exitPromptShowing) return;
+    if (!_hasDraftContent) {
+      Navigator.pop(context);
+      return;
+    }
+    _exitPromptShowing = true;
+    final save = await showAppConfirmDialog(
+      context,
+      message: '是否暂存输入的内容于本地？下次进入发帖页时将自动恢复。',
+      cancelText: '不暂存',
+      confirmText: '暂存',
+    );
+    _exitPromptShowing = false;
+    if (!mounted) return;
+    if (save == null) return; // 点弹窗外部关闭 → 留在本页
+    if (save) {
+      await PostStorage.savePostDraft(_draftToMap());
+    } else {
+      await PostStorage.clearPostDraft();
+    }
+    if (mounted) Navigator.pop(context);
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
@@ -439,19 +629,17 @@ class _PostCreatePageState extends State<PostCreatePage>
         _contentController.text.length >
         AppDimens.postCreateExpandThresholdChars;
 
-    return PopScope(
-      canPop:
-          ImageOverlay.currentEntry == null && !_contentExpandCtrl.isCompleted,
+    // canPop 实时求值：预览打开时返回只关预览；内容编辑器展开时先收起；
+    // 有未提交内容时弹出暂存询问。真正的退出动作统一走 _handleExitIntent
+    return LivePopScope(
+      recomputeTrigger: ImageOverlay.isOpen,
+      canPop: () =>
+          ImageOverlay.currentEntry == null &&
+          !_contentExpandCtrl.isCompleted &&
+          !_hasDraftContent,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (ImageOverlay.currentEntry != null) {
-          ImageOverlay.closeCurrent();
-          return;
-        }
-        if (_contentExpandCtrl.isCompleted) {
-          _closeContentEditor();
-          return;
-        }
+        _handleExitIntent();
       },
       child: Scaffold(
         backgroundColor: colors.postCreate.pageBg,
@@ -682,7 +870,7 @@ class _PostCreatePageState extends State<PostCreatePage>
                   Icons.keyboard_arrow_up,
                   color: colors.common.barText,
                 ),
-                onPressed: () => Navigator.pop(context),
+                onPressed: _handleExitIntent,
               ),
               const Spacer(),
               Padding(

@@ -17,6 +17,7 @@ class PostStorage {
   static late Box _versionBox;
   static late Box _accountBox;
   static late Box _searchHistoryBox;
+  static late Box _draftBox;
 
   static Future<void> init() async {
     // 并行打开各 box，缩短首帧前阻塞
@@ -29,7 +30,23 @@ class PostStorage {
       Hive.openBox('versions').then((b) => _versionBox = b),
       Hive.openBox('account').then((b) => _accountBox = b),
       Hive.openBox('search_history').then((b) => _searchHistoryBox = b),
+      Hive.openBox('post_draft').then((b) => _draftBox = b),
     ]);
+  }
+
+  // ---- 发帖页本地暂存草稿 ----
+
+  static Map? getPostDraft() {
+    final raw = _draftBox.get('draft');
+    return raw is Map ? Map<String, dynamic>.from(raw) : null;
+  }
+
+  static Future<void> savePostDraft(Map<String, dynamic> draft) {
+    return _draftBox.put('draft', draft);
+  }
+
+  static Future<void> clearPostDraft() {
+    return _draftBox.delete('draft');
   }
 
   // ---- 账号 ----
@@ -164,7 +181,11 @@ class PostStorage {
   }
 
   static List<Post> getAllCachedPosts() {
-    return _postBox.keys.cast<int>().map((id) => getPost(id)!).where((p) => true).toList();
+    return _postBox.keys
+        .cast<int>()
+        .map((id) => getPost(id)!)
+        .where((p) => true)
+        .toList();
   }
 
   static Future<void> deletePost(int id) async {
@@ -198,22 +219,19 @@ class PostStorage {
   // ---- PNG 原图文件缓存 ----
 
   static Future<Directory> _pngCacheDir() async {
-    final dir = Directory(
-        '${(await getTemporaryDirectory()).path}/png_cache');
+    final dir = Directory('${(await getTemporaryDirectory()).path}/png_cache');
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;
   }
 
   static Future<Uint8List?> getPng(String fileName) async {
-    final file = File(
-        '${(await _pngCacheDir()).path}/$fileName');
+    final file = File('${(await _pngCacheDir()).path}/$fileName');
     if (await file.exists()) return await file.readAsBytes();
     return null;
   }
 
   static Future<void> savePng(String fileName, Uint8List bytes) async {
-    final file = File(
-        '${(await _pngCacheDir()).path}/$fileName');
+    final file = File('${(await _pngCacheDir()).path}/$fileName');
     await file.writeAsBytes(bytes);
   }
 
@@ -326,7 +344,9 @@ class PostStorage {
     final raw = _versionBox.get('list');
     if (raw == null) return [];
     final list = raw as List;
-    return list.map((j) => VersionInfo.fromJson(Map<String, dynamic>.from(j as Map))).toList();
+    return list
+        .map((j) => VersionInfo.fromJson(Map<String, dynamic>.from(j as Map)))
+        .toList();
   }
 
   static Future<void> saveVersions(List<VersionInfo> versions) async {
