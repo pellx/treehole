@@ -709,10 +709,10 @@ class _RegisterPageState extends State<RegisterPage> {
         style: ElevatedButton.styleFrom(
           backgroundColor: colors.register.buttonBg,
           foregroundColor: colors.register.buttonText,
-          // 归零默认水平内边距：定宽按钮内 5 字标签不换行（同旧「登录/联系我们」处理）
+          // 文字到边框的内边距（左右/上下均可调；左右过大可能导致标签换行）
           padding: const EdgeInsets.symmetric(
             horizontal: RegisterDimens.deviceRegisteredButtonPaddingH,
-            vertical: 0,
+            vertical: RegisterDimens.deviceRegisteredButtonPaddingV,
           ),
           shape: RoundedRectangleBorder(
             borderRadius:
