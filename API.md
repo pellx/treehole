@@ -468,7 +468,8 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 1. 校验短信验证码
 2. 通过 `phone` 找到用户；未找到时进入找回路径（见下）
 3. 在该用户的绑定范围内匹配 `fingerprint_hash` 定位设备（兼容 iOS 重复指纹）
-4. 检查 `session:device_owner` 切号锁
+4. 主设备规则：该账户的主设备必须是本机（`primary_device_id` 匹配），
+   主设备登录不受切号锁限制；非主设备账户返回 `DEVICE_NOT_PRIMARY`
 5. 若尚无绑定则自动建绑
 6. 轮换 `device_secret`，签发 session
 
@@ -487,7 +488,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 400 | `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED` | |
 | 401 | `USER_NOT_FOUND` | 手机号未注册，且不满足找回路径条件 |
 | 401 | `FINGERPRINT_MISMATCH` | 该用户下无匹配指纹设备 |
-| 400 | `DEVICE_SESSION_LOCKED` | 本机切号锁被异用户占用 |
+| 400 | `DEVICE_NOT_PRIMARY` | 该账户的主设备不是本机 |
 | 400 | `REBIND_COOLDOWN` / `TRANSFER_REQUIRED` / `TRANSFER_INVALID` | 建绑受限 |
 
 ---
