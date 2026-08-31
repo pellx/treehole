@@ -1645,15 +1645,13 @@ class ApiService {
   }
 
   /// POST /user/sms/register — 手机号验证码注册，一步建号+建绑
-  /// 响应与 /user/registerV2 一致（user_token + device_secret）；
-  /// 验证码字段沿用 v2 的 verification_captcha（阿里云验证码 2.0）
+  ///（返回 user_token + device_secret；新账户以本机为主设备）。
+  /// 防刷依赖短信送达本身，无 CAPTCHA/PoW
   static Future<RegisterResult?> smsRegister({
     required String phone,
     required String code,
     required String userDisplayId,
     required DeviceFingerprint deviceFingerPrint,
-    required String verificationCaptcha,
-    required PoWResult verificationPow,
   }) async {
     try {
       final res = await _client
@@ -1665,11 +1663,6 @@ class ApiService {
               'code': code,
               'user_display_id': userDisplayId,
               'device_finger_print': deviceFingerPrint.toJson(),
-              'verification_captcha': verificationCaptcha,
-              'verification_pow': {
-                'challenge_id': verificationPow.challengeId,
-                'nonce': verificationPow.nonce,
-              },
             }),
           )
           .timeout(_timeout);

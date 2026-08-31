@@ -387,12 +387,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
   "phone": "13800138000",
   "code": "123456",
   "user_display_id": "昵称",
-  "device_finger_print": { "platform": "ios", "ios": {...} },
-  "verification_captcha": "阿里云验证码 2.0 captchaVerifyParam",
-  "verification_pow": {
-    "challenge_id": "...",
-    "nonce": 123456
-  }
+  "device_finger_print": { "platform": "ios", "ios": {...} }
 }
 ```
 
@@ -407,7 +402,8 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 
 **特性**
 
-- 与 `/user/registerV2` 一致：阿里云验证码 2.0 + PoW 防刷（captcha param 一次性，无需 consume）。
+- 无 CAPTCHA/PoW：防刷由短信送达本身承担（发送侧 60s 冷却/每日 25 条/IP 限流 + 验证码核验）。
+- 校验链路：短信验证码核验 → 手机号未被占用（`PHONE_TAKEN`）→ 建号建绑；手机号写入账户，注册设备设为主设备（`primary_device_id`）。
 - 事务内同时写入 `users`、`devices`、`fingerprints`、`user_device_binding`（active）及两个 history 表。
 - iOS 设备允许 `fingerprint_hash` 重复（不同用户各自独立建绑）。
 - Android 设备命中已注册指纹时不再拒绝：复用既有设备建新号并轮换 `device_secret`（「已注册设备引导页 → 注册新账号」只会出现在设备已注册的状态下）。
@@ -419,7 +415,6 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 400 | `SMS_CODE_INVALID` / `SMS_CODE_EXPIRED` / `SMS_CODE_ATTEMPTS_EXCEEDED` |
 | 400 | `PHONE_TAKEN` |
 | 400 | `NAME_TAKEN` |
-| 400 | `验证码验证失败`（含 F00x）/ `PoW 验证失败` |
 
 ---
 
@@ -1828,7 +1823,7 @@ ios_sysname, ios_machine, ios_nodename
 注册：
 1. POST /user/sms/send { phone, scene: 'register' }
 2. 输入短信验证码
-3. POST /user/sms/register { phone, code, user_display_id, device_finger_print, verification_captcha, pow }
+3. POST /user/sms/register { phone, code, user_display_id, device_finger_print }
    → user_token + device_secret（已同时建绑）
 4. POST /user/session/create → session
 

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,20 +5,19 @@ import '../../models/device_fingerprint.dart';
 import '../../services/api.dart';
 import '../../services/device_credential_store.dart';
 import '../../services/device_fingerprint.dart';
-import '../../services/pow.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_sms.dart';
-import 'captcha_view.dart';
 
 /// 手机号注册新账号页（官方「手机号登录」样式，系统默认路由推入）。
 ///
 /// 第一步输入手机号点「发送验证码」，出现验证码/昵称输入框后点
-/// 「验证并注册」进入内嵌验证，通过即自动提交。
-/// POST /user/sms/send (scene: register) → POST /user/sms/register；
-/// 一步完成建号 + 建绑（返回 user_token + device_secret），保留验证码 +
-/// PoW 防刷：PoW 页面加载时后台预取。成功后 pop(true)，由注册页收尾退出。
+/// 「验证并注册」直接提交。POST /user/sms/send (scene: register) →
+/// POST /user/sms/register（手机号+指纹+短信验证码+用户名，无 CAPTCHA/PoW，
+/// 防刷依赖短信送达本身）；一步完成建号 + 建绑 + 手机号绑定 +
+/// 主设备设定（返回 user_token + device_secret）。
+/// 成功后 pop(true)，由注册页收尾退出。
 ///
 /// 样式集中在 SmsDimens（形状）与 SmsPageColors（颜色，亮/暗成对）。
 class SmsRegisterPage extends StatefulWidget {
@@ -41,13 +38,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
   bool _submitting = false;
   bool _codeSent = false;
   int _cooldown = 0;
-  bool _captchaPhase = false; // 确认后进入：嵌入验证码，通过即提交
   String? _error;
-
-  // PoW 预取（与 RegisterPage 相同策略：纯后台，提交时缺失再补取）
-  int? _prePowNonce;
-  PoWChallenge? _prePowChallenge;
-  bool _powFetching = false;
 
   bool _isValidPhone(String phone) => RegExp(r'^\d{11}$').hasMatch(phone);
 
@@ -62,7 +53,6 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
       await Future.delayed(const Duration(milliseconds: 350));
       if (mounted) _phoneFocusNode.requestFocus();
     });
-    _preFetchPow();
   }
 
   @override
@@ -79,53 +69,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     if (mounted) setState(() {});
   }
 
-  /// 后台预取 PoW，缩短提交时的等待
-  void _preFetchPow() {
-    if (_powFetching) return;
-    _powFetching = true;
-    ApiService.getPoWChallenge().then((challenge) async {
-      if (challenge == null || !mounted) {
-        _powFetching = false;
-        return;
-      }
-      _prePowChallenge = challenge;
-      final nonce = await PoWService.solve(challenge);
-      _powFetching = false;
-      if (mounted && nonce != null) _prePowNonce = nonce;
-    });
-  }
-
-  Future<void> _ensurePow() async {
-    if (_prePowChallenge != null && _prePowNonce != null) return;
-    final challenge = await ApiService.getPoWChallenge();
-    if (!mounted || challenge == null) {
-      if (mounted) setState(() => _error = 'PoW 获取失败，请重试');
-      return;
-    }
-    final nonce = await PoWService.solve(challenge);
-    if (!mounted) return;
-    if (nonce == null) {
-      setState(() => _error = 'PoW 计算失败，请重试');
-      return;
-    }
-    _prePowChallenge = challenge;
-    _prePowNonce = nonce;
-  }
-
-  void _startCooldown(int seconds) {
-    // 冷却计时的简单实现：页面生命周期短，无需复用登录页的 Timer 逻辑
-    Future<void> tick(int remaining) async {
-      if (!mounted) return;
-      setState(() => _cooldown = remaining);
-      if (remaining <= 0) return;
-      await Future.delayed(const Duration(seconds: 1));
-      await tick(remaining - 1);
-    }
-
-    unawaited(tick(seconds));
-  }
-
-  /// 主按钮：未发送时发送验证码，已发送后进入验证（captchaPhase）
+  /// 主按钮：未发送时发送验证码，已发送后直接提交注册
   Future<void> _onPrimary() async {
     if (!_codeSent) {
       await _sendCode();
@@ -136,7 +80,20 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
       }
       return;
     }
-    _confirm();
+    await _submit();
+  }
+
+  void _startCooldown(int seconds) {
+    // 冷却递减：页面生命周期短，简单实现即可
+    Future<void> tick(int remaining) async {
+      if (!mounted) return;
+      setState(() => _cooldown = remaining);
+      if (remaining <= 0) return;
+      await Future.delayed(const Duration(seconds: 1));
+      await tick(remaining - 1);
+    }
+
+    tick(seconds);
   }
 
   Future<void> _sendCode() async {
@@ -161,71 +118,39 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     }
   }
 
-  /// 填写完整后点确认 → 进入验证码阶段
-  void _confirm() {
+  /// 直接提交注册：手机号 + 指纹 + 短信验证码 + 用户名
+  Future<void> _submit() async {
     final phone = _phoneController.text.trim();
     final code = _codeController.text.trim();
     final name = _nameController.text.trim();
-    if (!_isValidPhone(phone) || code.isEmpty || name.isEmpty) return;
+    if (!_isValidPhone(phone) || code.isEmpty || name.isEmpty || _submitting) {
+      return;
+    }
 
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() {
-      _captchaPhase = true;
-      _error = null;
-    });
-    _preFetchPow();
-  }
-
-  /// 验证通过（用户真实点击完成）→ 提交 sms/register
-  Future<void> _onCaptchaVerified(String token) async {
-    if (!mounted || _submitting) return;
     setState(() {
       _submitting = true;
       _error = null;
     });
 
     try {
-      final phone = _phoneController.text.trim();
-      final code = _codeController.text.trim();
-      final name = _nameController.text.trim();
-
       final fp = await DeviceFingerprintService.collect();
       if (!mounted) return;
       if (fp.platform == DevicePlatform.unknown) {
-        setState(() {
-          _captchaPhase = false;
-          _error = '设备指纹不可用，请重试';
-        });
+        setState(() => _error = '设备指纹不可用，请重试');
         return;
       }
-
-      // PoW challenge TTL 约 3 分钟，缺失或过期时重新获取
-      await _ensurePow();
-      if (!mounted || _prePowChallenge == null || _prePowNonce == null) return;
 
       final result = await ApiService.smsRegister(
         phone: phone,
         code: code,
         userDisplayId: name,
         deviceFingerPrint: fp,
-        verificationCaptcha: token,
-        verificationPow: PoWResult(
-          challengeId: _prePowChallenge!.challengeId,
-          nonce: _prePowNonce!,
-        ),
       );
       if (!mounted) return;
 
       if (result == null) {
-        // 验证码 param 一次性：任何到达服务端的尝试都会消费它
-        if (ApiService.lastError == 'PoW 验证失败') {
-          _prePowChallenge = null;
-          _prePowNonce = null;
-        }
-        setState(() {
-          _captchaPhase = false;
-          _error = _mapRegisterError(ApiService.lastError);
-        });
+        setState(() => _error = _mapRegisterError(ApiService.lastError));
         return;
       }
 
@@ -248,12 +173,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
 
       Navigator.of(context).pop(true);
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _captchaPhase = false;
-          _error = '网络异常：$e';
-        });
-      }
+      if (mounted) setState(() => _error = '网络异常：$e');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -276,6 +196,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
       'SMS_CODE_ATTEMPTS_EXCEEDED' => '验证码错误次数过多，请重新获取',
       'PHONE_TAKEN' => '该手机号已绑定其他账号',
       'NAME_TAKEN' => '用户名被占用',
+      '该设备环境已注册' => '该设备已绑定此账户，无需重复注册',
       null || '' => '注册失败',
       final code => '注册失败：$code',
     };
@@ -288,16 +209,13 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     final phone = _phoneController.text.trim();
     final code = _codeController.text.trim();
     final name = _nameController.text.trim();
-    final canSend =
-        _isValidPhone(phone) && !_sending && _cooldown == 0;
-    final enabled = _captchaPhase
-        ? false
-        : _codeSent
-            ? _isValidPhone(phone) &&
-                code.isNotEmpty &&
-                name.isNotEmpty &&
-                !_submitting
-            : canSend;
+    final canSend = _isValidPhone(phone) && !_sending && _cooldown == 0;
+    final enabled = _codeSent
+        ? _isValidPhone(phone) &&
+            code.isNotEmpty &&
+            name.isNotEmpty &&
+            !_submitting
+        : canSend;
 
     return Scaffold(
       backgroundColor: colors.pageBg,
@@ -351,23 +269,19 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
               ),
             ),
             const SizedBox(height: SmsDimens.formTopGap),
-            if (_captchaPhase)
-              _buildCaptchaContent(colors)
-            else ...[
-              _buildPhoneBox(colors),
-              if (_codeSent) ...[
-                const SizedBox(height: SmsDimens.fieldGap),
-                _buildCodeBox(colors),
-                const SizedBox(height: SmsDimens.fieldGap),
-                _buildNameBox(colors),
-              ],
-              const SizedBox(height: SmsDimens.buttonTopGap),
-              _buildPrimaryButton(
-                colors,
-                _codeSent ? '验证并注册' : '发送验证码',
-                enabled ? _onPrimary : null,
-              ),
+            _buildPhoneBox(colors),
+            if (_codeSent) ...[
+              const SizedBox(height: SmsDimens.fieldGap),
+              _buildCodeBox(colors),
+              const SizedBox(height: SmsDimens.fieldGap),
+              _buildNameBox(colors),
             ],
+            const SizedBox(height: SmsDimens.buttonTopGap),
+            _buildPrimaryButton(
+              colors,
+              _codeSent ? '验证并注册' : '发送验证码',
+              enabled ? _onPrimary : null,
+            ),
             if (_error != null) ...[
               const SizedBox(height: SmsDimens.errorTopGap),
               Text(
@@ -579,29 +493,6 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
                 ),
               ),
       ),
-    );
-  }
-
-  /// 验证码阶段：提示 + 内嵌阿里云点击验证，通过后自动提交
-  Widget _buildCaptchaContent(SmsPageColors colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '完成验证后将自动提交',
-          style: TextStyle(
-            fontSize: SmsDimens.subtitleFontSize,
-            color: colors.subtitle,
-          ),
-        ),
-        const SizedBox(height: SmsDimens.fieldGap),
-        CaptchaView(
-          // SMS 注册服务端直接校验 captchaVerifyParam，无需 Redis 凭证，
-          // 校验处理器原样回传参数
-          verifyHandler: (param) async => param,
-          onVerified: _onCaptchaVerified,
-        ),
-      ],
     );
   }
 }
