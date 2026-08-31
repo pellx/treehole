@@ -20,9 +20,34 @@
   <button id="captcha-button" style="display:none"></button>
   <script>
     function __post(status, token, message) {
+      // App 内：经 JS channel 回传 Flutter
       if (window.CaptchaChannel && CaptchaChannel.postMessage) {
         CaptchaChannel.postMessage(JSON.stringify({status: status, token: token, message: message}));
+        return;
       }
+      // 浏览器自测：无 channel 时直接调后端 verify，把判定显示在页面上
+      if (status === 'success' && token) {
+        fetch('/node/user/captcha/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ captcha_verify_param: token })
+        }).then(function(r) { return r.text().then(function(t) { return 'HTTP ' + r.status + ' ' + t; }); })
+          .then(function(text) { show(text); })
+          .catch(function(e) { show('请求失败: ' + e.message); });
+      } else if (message) {
+        show(message);
+      }
+    }
+
+    function show(text) {
+      var box = document.getElementById('selftest-result');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'selftest-result';
+        box.style.cssText = 'font:13px monospace;color:#333;padding:8px;white-space:pre-wrap;word-break:break-all;';
+        document.body.appendChild(box);
+      }
+      box.textContent = '服务端判定: ' + text;
     }
 
     window.__renderCaptcha = function() {
