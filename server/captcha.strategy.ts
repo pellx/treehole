@@ -44,7 +44,7 @@ export class CaptchaStrategy implements VerificationStrategy {
       });
       this.client = new Client(config);
       this.logger.log(
-        `阿里云验证码已初始化 (VerifyIntelligentCaptcha, endpoint=${this.endpoint})`,
+        `阿里云验证码已初始化 (VerifyIntelligentCaptcha, endpoint=${this.endpoint}, sceneId=${this.sceneId})`,
       );
     } else {
       this.logger.error(
@@ -78,7 +78,7 @@ export class CaptchaStrategy implements VerificationStrategy {
       const result = response.body?.result;
 
       this.logger.log(
-        `VerifyIntelligentCaptcha 耗时=${elapsedMs}ms verifyResult=${result?.verifyResult} verifyCode=${result?.verifyCode}`,
+        `VerifyIntelligentCaptcha 耗时=${elapsedMs}ms scene=${this.sceneId} verifyResult=${result?.verifyResult} verifyCode=${result?.verifyCode}`,
       );
 
       // 以 VerifyResult 为准；VerifyCode 仅用于诊断/提示
