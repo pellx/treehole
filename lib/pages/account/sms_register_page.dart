@@ -10,13 +10,14 @@ import '../../services/storage.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_sms.dart';
 
-/// 手机号注册新账号页（官方「手机号登录」样式，系统默认路由推入）。
+/// 注册/登录页（官方「手机号登录」样式，系统默认路由推入）。
 ///
-/// 第一步输入手机号点「发送验证码」，出现验证码/昵称输入框后点
-/// 「验证并注册」直接提交。POST /user/sms/send (scene: register) →
-/// POST /user/sms/register（手机号+指纹+短信验证码+用户名，无 CAPTCHA/PoW，
-/// 防刷依赖短信送达本身）；一步完成建号 + 建绑 + 手机号绑定 +
-/// 主设备设定（返回 user_token + device_secret）。
+/// 第一步输入手机号点「发送验证码」——请求携带设备指纹，服务端判定并
+/// 返回模式，第二步按模式提交：
+///   login    手机号已注册 → 验证并登录（/user/sms/login）
+///   recover  未注册，绑定到本机主设备账户后登录（/user/sms/login 找回路径）
+///   register 注册新账户（/user/sms/register，手机号绑定到新账户、
+///            主设备为本机），仅此模式需要填写昵称
 /// 成功后 pop(true)，由注册页收尾退出。
 ///
 /// 样式集中在 SmsDimens（形状）与 SmsPageColors（颜色，亮/暗成对）。
@@ -40,7 +41,16 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
   int _cooldown = 0;
   String? _error;
 
+  /// 发送时服务端判定的模式：login | recover | register
+  String? _mode;
+
+  /// 发送时采集的硬件指纹 hash（提交 login 时复用）
+  String? _fingerprintHash;
+
   bool _isValidPhone(String phone) => RegExp(r'^\d{11}$').hasMatch(phone);
+
+  /// register 模式需要昵称，login/recover 不需要
+  bool get _needsName => _mode == 'register';
 
   @override
   void initState() {
@@ -69,7 +79,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     if (mounted) setState(() {});
   }
 
-  /// 主按钮：未发送时发送验证码，已发送后直接提交注册
+  /// 主按钮：未发送时发送验证码，已发送后按模式提交
   Future<void> _onPrimary() async {
     if (!_codeSent) {
       await _sendCode();
@@ -102,7 +112,15 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
 
     setState(() => _sending = true);
     try {
-      final result = await ApiService.smsSend(phone: phone, scene: 'register');
+      // 服务端需要指纹判定模式（login/recover/register）
+      final fingerprint = await DeviceFingerprintService.collect();
+      final hash = SessionService.computeFingerprintHash(fingerprint);
+
+      final result = await ApiService.smsSend(
+        phone: phone,
+        scene: 'register',
+        fingerprintHash: hash,
+      );
       if (!mounted) return;
       if (result == null) {
         setState(() => _error = _mapSendError(ApiService.lastError));
@@ -111,6 +129,8 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
       setState(() {
         _error = null;
         _codeSent = true;
+        _mode = result.mode;
+        _fingerprintHash = hash;
       });
       _startCooldown(result.cooldownSeconds);
     } finally {
@@ -118,14 +138,14 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     }
   }
 
-  /// 直接提交注册：手机号 + 指纹 + 短信验证码 + 用户名
+  /// 按模式提交：register → sms/register；login/recover → sms/login
+  ///（recover 的手机号绑定由 sms/login 找回路径完成）
   Future<void> _submit() async {
     final phone = _phoneController.text.trim();
     final code = _codeController.text.trim();
     final name = _nameController.text.trim();
-    if (!_isValidPhone(phone) || code.isEmpty || name.isEmpty || _submitting) {
-      return;
-    }
+    if (!_isValidPhone(phone) || code.isEmpty || _submitting) return;
+    if (_needsName && name.isEmpty) return;
 
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
@@ -141,37 +161,11 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
         return;
       }
 
-      final result = await ApiService.smsRegister(
-        phone: phone,
-        code: code,
-        userDisplayId: name,
-        deviceFingerPrint: fp,
-      );
-      if (!mounted) return;
-
-      if (result == null) {
-        setState(() => _error = _mapRegisterError(ApiService.lastError));
-        return;
+      if (_mode == 'register') {
+        await _submitRegister(phone, code, name, fp);
+      } else {
+        await _submitLogin(phone, code);
       }
-
-      // 与 RegisterPage 注册成功后的落盘一致
-      await DeviceCredentialStore.saveUserExternalToken(result.userToken);
-      await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
-      await DeviceCredentialStore.saveDeviceSecret(result.deviceSecret);
-      await PostStorage.saveDisplayName(name);
-      await PostStorage.setRegistered(true);
-
-      // sms/register 已建绑：用现有 secret 建 session
-      final activated =
-          await SessionService.instance.activateAfterRegister(result.userToken);
-      if (!activated && mounted) {
-        setState(() => _error =
-            '注册成功，但建绑/会话失败：${ApiService.lastError ?? '未知错误'}');
-        return;
-      }
-      if (!mounted) return;
-
-      Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) setState(() => _error = '网络异常：$e');
     } finally {
@@ -179,11 +173,102 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     }
   }
 
+  /// register 模式：注册新账户（手机号绑定到新账户、主设备为本机）
+  Future<void> _submitRegister(
+    String phone,
+    String code,
+    String name,
+    DeviceFingerprint fp,
+  ) async {
+    final result = await ApiService.smsRegister(
+      phone: phone,
+      code: code,
+      userDisplayId: name,
+      deviceFingerPrint: fp,
+    );
+    if (!mounted) return;
+
+    if (result == null) {
+      setState(() => _error = _mapRegisterError(ApiService.lastError));
+      return;
+    }
+
+    // 与 RegisterPage 注册成功后的落盘一致
+    await DeviceCredentialStore.saveUserExternalToken(result.userToken);
+    await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
+    await DeviceCredentialStore.saveDeviceSecret(result.deviceSecret);
+    await PostStorage.saveDisplayName(name);
+    await PostStorage.setRegistered(true);
+
+    // sms/register 已建绑：用现有 secret 建 session
+    final activated =
+        await SessionService.instance.activateAfterRegister(result.userToken);
+    if (!activated && mounted) {
+      setState(() =>
+          _error = '注册成功，但建绑/会话失败：${ApiService.lastError ?? '未知错误'}');
+      return;
+    }
+    if (!mounted) return;
+
+    Navigator.of(context).pop(true);
+  }
+
+  /// login/recover 模式：短信登录（recover 时服务端找回路径先绑定手机号）。
+  /// 指纹 hash 复用发送时采集的值（同机同会话，结果一致）
+  Future<void> _submitLogin(String phone, String code) async {
+    final hash = _fingerprintHash ??
+        SessionService.computeFingerprintHash(
+          await DeviceFingerprintService.collect(),
+        );
+
+    final result = await ApiService.smsLogin(
+      phone: phone,
+      code: code,
+      fingerprintHash: hash,
+    );
+    if (!mounted) return;
+    if (result == null) {
+      setState(() => _error = _mapLoginError(ApiService.lastError));
+      return;
+    }
+
+    // 服务端已直接签发 session：写入顶层 session 并视为已注册
+    SessionService.instance.invalidate();
+    await DeviceCredentialStore.clearSession();
+    await DeviceCredentialStore.saveSessionId(result.sessionId);
+    await DeviceCredentialStore.saveSessionSecret(result.sessionSecret);
+    // 完成账户令牌登记（切号/failover 机制依赖）
+    final userToken = result.userToken?.trim() ?? '';
+    if (userToken.isNotEmpty) {
+      await DeviceCredentialStore.saveUserExternalToken(userToken);
+      await DeviceCredentialStore.mergeKnownUserTokens([userToken]);
+      await DeviceCredentialStore.saveAccountSession(
+        userToken,
+        result.sessionId,
+        result.sessionSecret,
+      );
+      await DeviceCredentialStore.touchLastSessionAt(userToken);
+    }
+    await PostStorage.setRegistered(true);
+
+    final profile = await ApiService.getUserProfile(
+      sessionId: result.sessionId,
+      sessionSecret: result.sessionSecret,
+    );
+    if (profile != null && profile.userDisplayId.isNotEmpty) {
+      await PostStorage.saveDisplayName(profile.userDisplayId);
+    }
+
+    if (!mounted) return;
+    Navigator.of(context).pop(true);
+  }
+
   String _mapSendError(String? raw) {
     return switch (raw) {
       'SMS_DAILY_LIMIT_EXCEEDED' => '该手机号今日发送次数已达上限',
       'SMS_IP_RATE_LIMIT_EXCEEDED' => '发送过于频繁，请稍后再试',
       'SMS_SEND_FAILED' => '短信发送失败，请稍后再试',
+      'PHONE_MISMATCH_FOR_DEVICE' => '该手机号与设备当前账户不符，请注册新账号',
       null || '' => '发送失败',
       final code => '发送失败：$code',
     };
@@ -196,10 +281,39 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
       'SMS_CODE_ATTEMPTS_EXCEEDED' => '验证码错误次数过多，请重新获取',
       'PHONE_TAKEN' => '该手机号已绑定其他账号',
       'NAME_TAKEN' => '用户名被占用',
-      '该设备环境已注册' => '该设备已绑定此账户，无需重复注册',
       null || '' => '注册失败',
       final code => '注册失败：$code',
     };
+  }
+
+  String _mapLoginError(String? raw) {
+    return switch (raw) {
+      'SMS_CODE_INVALID' => '验证码错误',
+      'SMS_CODE_EXPIRED' => '验证码已过期，请重新获取',
+      'SMS_CODE_ATTEMPTS_EXCEEDED' => '验证码错误次数过多，请重新获取',
+      'USER_NOT_FOUND' => '该手机号未注册，且本机没有可找回的账户',
+      'FINGERPRINT_MISMATCH' => '本机设备不在该账户的绑定范围内',
+      'DEVICE_SESSION_LOCKED' => '本机切号锁定中（约 2 天），暂不可切换',
+      'REBIND_COOLDOWN' => '解绑冷却中，请 2 天后再登录此账户',
+      'TRANSFER_REQUIRED' => '需先在原设备发起转移申请（15 分钟内有效）',
+      'TRANSFER_INVALID' => '转移申请无效或已过期，请在原设备重新申请',
+      null || '' => '登录失败',
+      final code => '登录失败：$code',
+    };
+  }
+
+  /// 按模式显示的副标题
+  String get _subtitle {
+    switch (_mode) {
+      case 'login':
+        return '该手机号已注册，验证后将登录';
+      case 'recover':
+        return '验证后将绑定到本机账户并登录';
+      case 'register':
+        return '该手机号未注册，验证后将注册新账号';
+      default:
+        return '未注册的手机号验证后将自动注册新账号';
+    }
   }
 
   @override
@@ -213,7 +327,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     final enabled = _codeSent
         ? _isValidPhone(phone) &&
             code.isNotEmpty &&
-            name.isNotEmpty &&
+            (!(_mode == 'register') || name.isNotEmpty) &&
             !_submitting
         : canSend;
 
@@ -252,7 +366,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
             ),
             const SizedBox(height: SmsDimens.titleTopGap),
             Text(
-              '注册新账号',
+              '注册/登录',
               style: TextStyle(
                 fontSize: SmsDimens.titleFontSize,
                 fontWeight: SmsDimens.titleFontWeight,
@@ -261,7 +375,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
             ),
             const SizedBox(height: SmsDimens.subtitleTopGap),
             Text(
-              '未注册的手机号验证后将自动注册新账号',
+              _subtitle,
               style: TextStyle(
                 fontSize: SmsDimens.subtitleFontSize,
                 height: SmsDimens.subtitleLineHeight,
@@ -273,13 +387,17 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
             if (_codeSent) ...[
               const SizedBox(height: SmsDimens.fieldGap),
               _buildCodeBox(colors),
-              const SizedBox(height: SmsDimens.fieldGap),
-              _buildNameBox(colors),
+              if (_mode == 'register') ...[
+                const SizedBox(height: SmsDimens.fieldGap),
+                _buildNameBox(colors),
+              ],
             ],
             const SizedBox(height: SmsDimens.buttonTopGap),
             _buildPrimaryButton(
               colors,
-              _codeSent ? '验证并注册' : '发送验证码',
+              _codeSent
+                  ? (_mode == 'register' ? '验证并注册' : '验证并登录')
+                  : '发送验证码',
               enabled ? _onPrimary : null,
             ),
             if (_error != null) ...[

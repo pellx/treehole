@@ -8,9 +8,15 @@ class SmsSendResult {
   /// sent=false 时为剩余冷却秒数；否则为本次冷却时长
   final int cooldownSeconds;
 
+  /// 携带指纹发送时的判定模式：
+  /// login（手机号已注册）/ recover（绑定到本机主设备账户后登录）/
+  /// register（注册新账户）；未携带指纹时为 null
+  final String? mode;
+
   const SmsSendResult({
     required this.sent,
     required this.cooldownSeconds,
+    this.mode,
   });
 }
 

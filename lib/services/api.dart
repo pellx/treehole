@@ -1633,6 +1633,7 @@ class ApiService {
           return SmsSendResult(
             sent: data['sent'] as bool? ?? false,
             cooldownSeconds: (data['cooldown_seconds'] as num?)?.toInt() ?? 60,
+            mode: data['mode'] as String?,
           );
         }
         lastError = _parseErrorMessage(res.body);

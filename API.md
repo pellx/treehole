@@ -356,21 +356,32 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 
 `scene` 可选：`register` | `login` | `bind`。
 
-**找回前置校验**：`scene=login` 且携带 `fingerprint_hash` 时，服务端识别本机账户
-（活绑定账户中以本机为主设备者；无法唯一识别则不拦截）：
-- 账户手机号与输入一致，或账户未绑手机号 → 正常发送（未绑定时的绑定在验证通过后的 `/user/sms/login` 找回路径中处理）
-- 账户已绑其他手机号 → `PHONE_MISMATCH_FOR_DEVICE`，客户端应提示并引导注册新账号
+**模式判定（携带 `fingerprint_hash` 时）**：响应额外返回 `mode` 字段，客户端据此
+决定验证后的提交接口：
+- `login`：手机号已注册 → 提交 `/user/sms/login` 直接登录
+- `recover`：手机号未注册，且以本机为主设备的账户未绑手机号 → 提交 `/user/sms/login`，
+  其找回路径把该手机号绑定到本机账户后登录
+- `register`：手机号未注册，本机主设备账户已绑手机号（或无法识别本机账户）→
+  提交 `/user/sms/register` 注册新账户（手机号绑定到新账户，主设备为本机）
+
+阿里云发送场景随模式选择（login/recover → `login`，register → `register`），
+与后续校验接口的 scene 一致。
+
+**旧版找回页前置校验**（`scene=login` 不带指纹时）：识别本机账户并比对手机号，
+已绑其他手机号 → `PHONE_MISMATCH_FOR_DEVICE`，客户端应提示并引导注册新账号。
 
 **响应** `200`
 
 ```json
 {
   "sent": true,
-  "cooldown_seconds": 60
+  "cooldown_seconds": 60,
+  "mode": "register"
 }
 ```
 
-若处于冷却期：`sent: false`，`cooldown_seconds` 为剩余秒数。
+若处于冷却期：`sent: false`，`cooldown_seconds` 为剩余秒数。`mode` 仅在携带
+`fingerprint_hash` 时返回，取值 `login` / `recover` / `register`。
 
 **错误**
 

@@ -524,7 +524,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     SizedBox(
                       width: RegisterDimens.deviceRegisteredButtonGap,
                     ),
-                    _buildRegisteredButton(colors, '注册新账号', _openSmsRegister),
+                    _buildRegisteredButton(colors, '注册/登录', _openSmsRegister),
                   ],
                 ),
               ),
