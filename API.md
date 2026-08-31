@@ -349,11 +349,18 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 ```json
 {
   "phone": "13800138000",
-  "scene": "register"
+  "scene": "register",
+  "fingerprint_hash": "当前设备指纹 SHA-256 hex（可选，找回场景建议携带）"
 }
 ```
 
 `scene` 可选：`register` | `login` | `bind`。
+
+**找回前置校验**：`scene=login` 且携带 `fingerprint_hash` 时，服务端识别本机账户
+（活绑定账户中以本机为主设备者；无法唯一识别则不拦截）：
+- 账户手机号与输入一致 → 正常发送
+- 账户未绑手机号 → 先把输入手机号绑定为账户手机号，再正常发送
+- 账户已绑其他手机号 → `PHONE_MISMATCH_FOR_DEVICE`，客户端应提示并引导注册新账号
 
 **响应** `200`
 
@@ -373,6 +380,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 400 | `SMS_DAILY_LIMIT_EXCEEDED` | 该手机号 24 小时内发送次数已达上限 |
 | 400 | `SMS_IP_RATE_LIMIT_EXCEEDED` | 当前 IP 发送过于频繁 |
 | 400 | `SMS_SEND_FAILED` | 短信服务商调用失败 |
+| 400 | `PHONE_MISMATCH_FOR_DEVICE` | 找回场景：手机号与本机账户不符 |
 
 ---
 

@@ -10,6 +10,7 @@ import '../../services/session_service.dart';
 import '../../services/storage.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_sms.dart';
+import 'sms_register_page.dart';
 
 /// 手机号找回页（官方「手机号登录」样式，系统默认路由推入）。
 ///
@@ -104,10 +105,29 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
 
     setState(() => _sending = true);
     try {
-      final result = await ApiService.smsSend(phone: phone, scene: 'login');
+      // 发送前置校验需要指纹：服务端比对手机号与本机账户的对应关系
+      final fingerprint = await DeviceFingerprintService.collect();
+      final hash = SessionService.computeFingerprintHash(fingerprint);
+
+      final result = await ApiService.smsSend(
+        phone: phone,
+        scene: 'login',
+        fingerprintHash: hash,
+      );
       if (!mounted) return;
       if (result == null) {
-        setState(() => _error = _mapSendError(ApiService.lastError));
+        final err = ApiService.lastError;
+        if (err == 'PHONE_MISMATCH_FOR_DEVICE') {
+          // 输入手机号与本机账户不符：提示并转注册新账号
+          final registered = await Navigator.of(context).push<bool>(
+            MaterialPageRoute(builder: (_) => const SmsRegisterPage()),
+          );
+          if (registered == true && mounted) {
+            Navigator.of(context).pop(true);
+          }
+          return;
+        }
+        setState(() => _error = _mapSendError(err));
         return;
       }
       setState(() {
@@ -187,6 +207,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
       'SMS_DAILY_LIMIT_EXCEEDED' => '该手机号今日发送次数已达上限',
       'SMS_IP_RATE_LIMIT_EXCEEDED' => '发送过于频繁，请稍后再试',
       'SMS_SEND_FAILED' => '短信发送失败，请稍后再试',
+      'PHONE_MISMATCH_FOR_DEVICE' => '该手机号与设备当前账户不符，请注册新账号',
       null || '' => '发送失败',
       final code => '发送失败：$code',
     };

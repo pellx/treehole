@@ -1603,11 +1603,14 @@ class ApiService {
 
   /// POST /user/sms/send — 发送短信验证码（scene: register | login | bind）
   /// 冷却期内返回 sent=false 与剩余秒数，不视为错误。
+  /// 找回（login）场景建议传 [fingerprintHash]：服务端校验手机号与本机账户
+  /// 的对应关系，不符时返回 PHONE_MISMATCH_FOR_DEVICE。
   /// 移动网络下偶发连接失败（基站切换/闲置连接被回收等），异常时自动重试一次；
   /// 服务端业务错误（限流等）不重试。
   static Future<SmsSendResult?> smsSend({
     required String phone,
     required String scene,
+    String? fingerprintHash,
   }) async {
     for (var attempt = 1; attempt <= 2; attempt++) {
       if (attempt > 1) {
@@ -1621,6 +1624,7 @@ class ApiService {
               body: jsonEncode({
                 'phone': phone,
                 'scene': scene,
+                if (fingerprintHash != null) 'fingerprint_hash': fingerprintHash,
               }),
             )
             .timeout(_timeout);
