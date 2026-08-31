@@ -442,8 +442,11 @@ class PoWResult {
 
 class ApiService {
   static const _base = 'https://tree.leisure.xin/node/posts';
+  static const _baseV2 = 'https://tree.leisure.xin/node/posts/v2';
   static const _commentBase =
-      'https://tree.leisure.xin/node/posts/comment'; // 回复 API
+      'https://tree.leisure.xin/node/posts/comment'; // 回复 API（网页端 v1）
+  static const _commentBaseV2 =
+      'https://tree.leisure.xin/node/posts/v2/comment'; // 回复 API（App 端 v2）
   static const _thumbBase =
       'https://tree.leisure.xin/node/file-processor/convert/2webp/upload';
   static const _originalBase = 'https://www.leisure.xin:33433/upload';
@@ -672,19 +675,14 @@ class ApiService {
     return null;
   }
 
-  /// 上传不带 session（后端 DTO 禁止）；署名时传 [userId]。
+  /// 上传不带 session / user_id（后端 DTO 禁止，署名走发帖 body 的 author）。
   static Future<UploadResult?> uploadFile(
     PostUploadType type,
-    File file, {
-    String? userId,
-  }) async {
+    File file,
+  ) async {
     try {
       final request = http.MultipartRequest('POST', Uri.parse(_uploadBase));
       request.fields['type'] = type.apiValue;
-      final uid = userId?.trim();
-      if (uid != null && uid.isNotEmpty) {
-        request.fields['user_id'] = uid;
-      }
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       final streamed = await _client.send(request).timeout(_timeout);
       if (!_isHttpSuccess(streamed.statusCode)) {
@@ -708,13 +706,21 @@ class ApiService {
     }
   }
 
-  static Future<Post?> createPost(PostDraft draft) async {
+  /// v2 发帖：session 必带；user_id / 署名作者由后端按 session 解析落库
+  static Future<Post?> createPost(
+    PostDraft draft, {
+    required int sessionId,
+    required String sessionSecret,
+  }) async {
     try {
+      final body = draft.toJson()
+        ..['session_id'] = sessionId
+        ..['session_secret'] = sessionSecret;
       final res = await _client
           .post(
-            Uri.parse(_base),
+            Uri.parse(_baseV2),
             headers: const {'Content-Type': 'application/json'},
-            body: jsonEncode(draft.toJson()),
+            body: jsonEncode(body),
           )
           .timeout(_timeout);
       if (!_isHttpSuccess(res.statusCode)) {
@@ -749,28 +755,25 @@ class ApiService {
     }
   }
 
-  /// 回复不带 session（后端 DTO 禁止）；署名时传 [userId]。
+  /// v2 回复：session 必带；user_id / 署名作者由后端按 session 解析落库
   static Future<Comment?> createComment({
     required int postId,
     required String content,
-    String? author,
     bool isAnonymous = false,
-    int? toId,
-    String? userId,
+    required int sessionId,
+    required String sessionSecret,
   }) async {
     try {
       final body = <String, dynamic>{
         'postId': postId,
         'content': content,
         'is_anonymous': isAnonymous,
+        'session_id': sessionId,
+        'session_secret': sessionSecret,
       };
-      if (author != null && author.isNotEmpty) body['author'] = author;
-      final uid = userId?.trim();
-      if (uid != null && uid.isNotEmpty) body['user_id'] = uid;
-      if (toId != null) body['toId'] = toId;
       final res = await _client
           .post(
-            Uri.parse(_commentBase),
+            Uri.parse(_commentBaseV2),
             headers: const {'Content-Type': 'application/json'},
             body: jsonEncode(body),
           )

@@ -13,6 +13,7 @@ import '../../widgets/image_overlay.dart';
 import '../../widgets/live_pop_scope.dart';
 import '../../models/upload_result.dart';
 import '../../services/api.dart';
+import '../../services/device_credential_store.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
 import '../../theme/app_colors.dart';
@@ -73,13 +74,6 @@ class _PostCreatePageState extends State<PostCreatePage>
     ..._uploadedImages,
     if (_uploadedAttachment != null) _uploadedAttachment!,
   ];
-
-  /// 优先用资料里的 user_display_id，没有再回退本地昵称
-  String get _userName {
-    final display = PostStorage.getDisplayName()?.trim();
-    if (display != null && display.isNotEmpty) return display;
-    return PostStorage.getUserName();
-  }
 
   @override
   void initState() {
@@ -264,26 +258,17 @@ class _PostCreatePageState extends State<PostCreatePage>
       _errorMessage = null;
     });
 
-    // 上传不带 session；署名才带 user_id
-    final userId = _hasAuthor ? _userName : null;
-
+    // 上传不带 session / user_id（后端 DTO 禁止）；归属在发帖 v2 时由 session 落库
     // 并行上传
     final futures = <Future<UploadResult?>>[];
     for (final img in pickedImages) {
-      futures.add(
-        ApiService.uploadFile(
-          PostUploadType.image,
-          File(img.path),
-          userId: userId,
-        ),
-      );
+      futures.add(ApiService.uploadFile(PostUploadType.image, File(img.path)));
     }
     if (pickedAttachment != null) {
       futures.add(
         ApiService.uploadFile(
           PostUploadType.attachment,
           File(pickedAttachment.path),
-          userId: userId,
         ),
       );
     }
@@ -394,18 +379,28 @@ class _PostCreatePageState extends State<PostCreatePage>
       _errorMessage = null;
     });
 
-    // 发帖 body 不带 session；署名才附加 user_id / author
-    final userId = _hasAuthor ? _userName : null;
+    // v2 发帖：session 必带；署名作者由后端按 session 解析，body 不带 author / user_id
+    final sessionId = await DeviceCredentialStore.getSessionId();
+    final sessionSecret = await DeviceCredentialStore.getSessionSecret();
+    if (sessionId == null ||
+        sessionSecret == null ||
+        sessionSecret.isEmpty) {
+      setState(() => _submitting = false);
+      _setError('登录状态已失效，请重新登录');
+      return;
+    }
     final draft = PostDraft(
       title: title,
       content: _contentController.text,
-      author: userId ?? '',
       isAnonymous: !_hasAuthor,
       uploaded: _uploaded,
-      userId: userId,
     );
 
-    final post = await ApiService.createPost(draft);
+    final post = await ApiService.createPost(
+      draft,
+      sessionId: sessionId,
+      sessionSecret: sessionSecret,
+    );
     if (!mounted) return;
 
     setState(() => _submitting = false);
@@ -550,19 +545,13 @@ class _PostCreatePageState extends State<PostCreatePage>
       _uploading = true;
       _errorMessage = null;
     });
-    final userId = _hasAuthor ? _userName : null;
     final futures = <Future<UploadResult?>>[
       for (final img in images)
-        ApiService.uploadFile(
-          PostUploadType.image,
-          File(img.path),
-          userId: userId,
-        ),
+        ApiService.uploadFile(PostUploadType.image, File(img.path)),
       if (attachment != null)
         ApiService.uploadFile(
           PostUploadType.attachment,
           File(attachment.path),
-          userId: userId,
         ),
     ];
     final results = await Future.wait(futures);

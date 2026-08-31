@@ -10,6 +10,7 @@ import '../theme/app_colors.dart';
 import '../services/storage.dart';
 import '../services/timezone_service.dart';
 import '../services/api.dart';
+import '../services/device_credential_store.dart';
 import '../services/session_service.dart';
 import '../pages/account/register_page.dart';
 import '../pages/settings/settings_navigation.dart';
@@ -818,26 +819,27 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  /// 优先用资料里的 user_display_id，没有再回退本地昵称
-  String get _commentUserName {
-    final display = PostStorage.getDisplayName()?.trim();
-    if (display != null && display.isNotEmpty) return display;
-    return PostStorage.getUserName();
-  }
-
   Future<void> _submitComment() async {
     HapticFeedback.mediumImpact();
     final content = _commentController.text.trim();
     if (content.isEmpty) return;
 
-    // 回复不带 session；署名才带 user_id / author
-    final userId = _commentHasAuthor ? _commentUserName : null;
+    // v2 回复：session 必带；署名作者由后端按 session 解析，body 不带 author / user_id
+    final sessionId = await DeviceCredentialStore.getSessionId();
+    final sessionSecret = await DeviceCredentialStore.getSessionSecret();
+    if (sessionId == null ||
+        sessionSecret == null ||
+        sessionSecret.isEmpty) {
+      if (!mounted) return;
+      showAppSnackBar(context, message: '登录状态已失效，请重新登录');
+      return;
+    }
     final result = await ApiService.createComment(
       postId: widget.post.id,
       content: content,
-      author: userId,
       isAnonymous: !_commentHasAuthor,
-      userId: userId,
+      sessionId: sessionId,
+      sessionSecret: sessionSecret,
     );
     if (!mounted) return;
     if (result != null) {
