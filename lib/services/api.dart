@@ -1602,39 +1602,46 @@ class ApiService {
   // ---- 手机号短信注册 / 登录（API.md 4b–4d）----
 
   /// POST /user/sms/send — 发送短信验证码（scene: register | login | bind）
-  /// 冷却期内返回 sent=false 与剩余秒数，不视为错误
+  /// 冷却期内返回 sent=false 与剩余秒数，不视为错误。
+  /// 移动网络下偶发连接失败（基站切换/闲置连接被回收等），异常时自动重试一次；
+  /// 服务端业务错误（限流等）不重试。
   static Future<SmsSendResult?> smsSend({
     required String phone,
     required String scene,
   }) async {
-    try {
-      final res = await _client
-          .post(
-            Uri.parse('$_userBase/sms/send'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'phone': phone,
-              'scene': scene,
-            }),
-          )
-          .timeout(_timeout);
-      if (_isHttpSuccess(res.statusCode)) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        return SmsSendResult(
-          sent: data['sent'] as bool? ?? false,
-          cooldownSeconds: (data['cooldown_seconds'] as num?)?.toInt() ?? 60,
-        );
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      if (attempt > 1) {
+        await Future.delayed(const Duration(milliseconds: 800));
       }
-      lastError = _parseErrorMessage(res.body);
-      debugPrint(
-        '[ApiService] smsSend status=${res.statusCode} body=${res.body}',
-      );
-      return null;
-    } catch (e) {
-      lastError = '网络连接失败';
-      debugPrint('[ApiService] smsSend error: $e');
-      return null;
+      try {
+        final res = await _client
+            .post(
+              Uri.parse('$_userBase/sms/send'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'phone': phone,
+                'scene': scene,
+              }),
+            )
+            .timeout(_timeout);
+        if (_isHttpSuccess(res.statusCode)) {
+          final data = jsonDecode(res.body) as Map<String, dynamic>;
+          return SmsSendResult(
+            sent: data['sent'] as bool? ?? false,
+            cooldownSeconds: (data['cooldown_seconds'] as num?)?.toInt() ?? 60,
+          );
+        }
+        lastError = _parseErrorMessage(res.body);
+        debugPrint(
+          '[ApiService] smsSend status=${res.statusCode} body=${res.body}',
+        );
+        return null;
+      } catch (e) {
+        lastError = '网络连接失败，请重试';
+        debugPrint('[ApiService] smsSend error (attempt $attempt): $e');
+      }
     }
+    return null;
   }
 
   /// POST /user/sms/register — 手机号验证码注册，一步建号+建绑
