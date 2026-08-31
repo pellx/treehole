@@ -11,8 +11,8 @@ class SmsDimens {
   // ── 页面框架 ──
   static const double pageHPadding = 24;
   static const double backIconSize = 22;
-  /// 返回按钮点击区（宽即图标距左缘的距离）
-  static const double backTapWidth = 32;
+  /// 返回按钮图标左缘距屏幕左缘的绝对距离（不受点击区宽度和页面边距影响）
+  static const double backIconLeftInset = 24;
   static const double backTapHeight = 36;
   static const double titleTopGap = 20;
   static const double titleFontSize = 30;
@@ -20,9 +20,9 @@ class SmsDimens {
   static const double subtitleTopGap = 10;
   static const double subtitleFontSize = 15;
   static const double subtitleLineHeight = 1.5;
-  static const double formTopGap = 36;
+  static const double formTopGap = 16;
   static const double fieldGap = 16;
-  static const double buttonTopGap = 40;
+  static const double buttonTopGap = 20;
   static const double errorTopGap = 16;
   static const double errorFontSize = 13;
 

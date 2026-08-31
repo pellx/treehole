@@ -231,17 +231,25 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
           children: [
             Align(
               alignment: Alignment.centerLeft,
-              child: IconButton(
-                onPressed: () => Navigator.of(context).maybePop(),
-                padding: EdgeInsets.zero,
-                constraints: BoxConstraints.tightFor(
-                  width: SmsDimens.backTapWidth,
-                  height: SmsDimens.backTapHeight,
+              // 平移量 = 绝对左距 - 页面边距，使图标左缘精确落在
+              // backIconLeftInset 处（点击区宽度不影响图标位置）
+              child: Transform.translate(
+                offset: Offset(
+                  SmsDimens.backIconLeftInset - SmsDimens.pageHPadding,
+                  0,
                 ),
-                icon: Icon(
-                  Icons.arrow_back_ios_new,
-                  size: SmsDimens.backIconSize,
-                  color: colors.title,
+                child: IconButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  padding: EdgeInsets.zero,
+                  constraints: BoxConstraints.tightFor(
+                    width: SmsDimens.backIconSize,
+                    height: SmsDimens.backTapHeight,
+                  ),
+                  icon: Icon(
+                    Icons.arrow_back_ios_new,
+                    size: SmsDimens.backIconSize,
+                    color: colors.title,
+                  ),
                 ),
               ),
             ),
