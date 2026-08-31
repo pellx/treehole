@@ -9,13 +9,14 @@ import '../../services/device_fingerprint.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
 import '../../theme/app_colors.dart';
-import '../../theme/app_dimens_register.dart';
+import '../../theme/app_dimens_sms.dart';
 
-/// 手机号找回页：短信验证码登录已存在账户。
+/// 手机号找回页（官方「手机号登录」样式，从右侧滑入）。
 ///
+/// 第一步输入手机号点「发送验证码」，出现验证码输入框后点「验证并找回」。
 /// POST /user/sms/send (scene: login) → POST /user/sms/login；
-/// 服务端按手机号定位账户并在其绑定范围内匹配本机指纹，直接签发 session。
-/// 成功后 pop(true)，由引导页（DeviceRegisteredPage）收尾退出。
+/// 服务端按手机号定位账户（未注册手机号走指纹找回路径），直接签发 session。
+/// 成功后 pop(true)，由注册页收尾退出。
 class SmsLoginPage extends StatefulWidget {
   const SmsLoginPage({super.key});
 
@@ -26,9 +27,11 @@ class SmsLoginPage extends StatefulWidget {
 class _SmsLoginPageState extends State<SmsLoginPage> {
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
+  final _codeFocusNode = FocusNode();
 
   bool _sending = false;
   bool _submitting = false;
+  bool _codeSent = false;
   int _cooldown = 0;
   Timer? _cooldownTimer;
   String? _error;
@@ -36,10 +39,22 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
   bool _isValidPhone(String phone) => RegExp(r'^\d{11}$').hasMatch(phone);
 
   @override
+  void initState() {
+    super.initState();
+    _phoneController.addListener(() {
+      if (mounted) setState(() {});
+    });
+    _codeController.addListener(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
   void dispose() {
     _cooldownTimer?.cancel();
     _phoneController.dispose();
     _codeController.dispose();
+    _codeFocusNode.dispose();
     super.dispose();
   }
 
@@ -60,6 +75,20 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     });
   }
 
+  /// 主按钮：未发送时发送验证码，已发送后验证并找回
+  Future<void> _onPrimary() async {
+    if (!_codeSent) {
+      await _sendCode();
+      if (_codeSent && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _codeFocusNode.requestFocus();
+        });
+      }
+      return;
+    }
+    await _confirm();
+  }
+
   Future<void> _sendCode() async {
     final phone = _phoneController.text.trim();
     if (!_isValidPhone(phone) || _sending || _cooldown > 0) return;
@@ -72,7 +101,10 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
         setState(() => _error = _mapSendError(ApiService.lastError));
         return;
       }
-      setState(() => _error = null);
+      setState(() {
+        _error = null;
+        _codeSent = true;
+      });
       _startCooldown(result.cooldownSeconds);
     } finally {
       if (mounted) setState(() => _sending = false);
@@ -110,7 +142,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
       await DeviceCredentialStore.clearSession();
       await DeviceCredentialStore.saveSessionId(result.sessionId);
       await DeviceCredentialStore.saveSessionSecret(result.sessionSecret);
-      // 后端若随响应带出 user_token，则一并完成账户令牌登记
+      // 后端随响应带出 user_token，完成账户令牌登记（切号/failover 依赖）
       final userToken = result.userToken?.trim() ?? '';
       if (userToken.isNotEmpty) {
         await DeviceCredentialStore.saveUserExternalToken(userToken);
@@ -175,291 +207,238 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     final phone = _phoneController.text.trim();
     final code = _codeController.text.trim();
     final canSend = _isValidPhone(phone) && !_sending && _cooldown == 0;
-    final canConfirm = _isValidPhone(phone) && code.isNotEmpty && !_submitting;
+    final enabled = _codeSent
+        ? _isValidPhone(phone) && code.isNotEmpty && !_submitting
+        : canSend;
 
     return Scaffold(
-      backgroundColor: colors.register.pageBg,
-      resizeToAvoidBottomInset: false,
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
-        child: SafeArea(
-          bottom: false,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              double centerLeft(double width, double hOffset) =>
-                  constraints.maxWidth / 2 - width / 2 + hOffset;
-              double centerTop(double height, double vOffset) =>
-                  constraints.maxHeight / 2 - height / 2 + vOffset;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // 白色椭圆背景
-                  Positioned(
-                    left: centerLeft(
-                      RegisterDimens.ellipseWidth,
-                      RegisterDimens.ellipseHOffset,
-                    ),
-                    top: centerTop(
-                      RegisterDimens.ellipseHeight,
-                      RegisterDimens.ellipseVOffset,
-                    ),
-                    width: RegisterDimens.ellipseWidth,
-                    height: RegisterDimens.ellipseHeight,
-                    child: IgnorePointer(
-                      child: ClipOval(
-                        child: ColoredBox(color: colors.register.ellipseBg),
-                      ),
-                    ),
-                  ),
-                  // 插图（与令牌登录阶段一致）
-                  Positioned(
-                    left: centerLeft(
-                      RegisterDimens.loginImageWidth,
-                      RegisterDimens.loginImageHOffset,
-                    ),
-                    top: centerTop(
-                      RegisterDimens.loginImageHeight,
-                      RegisterDimens.loginImageVOffset,
-                    ),
-                    width: RegisterDimens.loginImageWidth,
-                    height: RegisterDimens.loginImageHeight,
-                    child: IgnorePointer(
-                      child: Image.asset(
-                        'assets/mu/mu-login.png',
-                        fit: BoxFit.contain,
-                        alignment: Alignment.center,
-                        filterQuality: FilterQuality.medium,
-                      ),
-                    ),
-                  ),
-                  // 标题
-                  Positioned.fill(
-                    child: Align(
-                      alignment: Alignment.center,
-                      child: Transform.translate(
-                        offset: const Offset(0, RegisterDimens.phaseTitleVOffset),
-                        child: Text(
-                          '手机号找回',
-                          style: TextStyle(
-                            fontSize: RegisterDimens.phaseTitleFontSize,
-                            fontWeight: FontWeight.bold,
-                            color: onSurface,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  // 交互内容
-                  Positioned.fill(
-                    child: Align(
-                      alignment: Alignment.center,
-                      child: Transform.translate(
-                        offset: const Offset(0, RegisterDimens.smsContentVOffset),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: RegisterDimens.contentHPadding,
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              _buildPhoneInput(onSurface),
-                              const SizedBox(height: RegisterDimens.smsRowGap),
-                              _buildCodeRow(colors, onSurface, canSend),
-                              const SizedBox(height: RegisterDimens.smsRowGap),
-                              _buildConfirmButton(colors, canConfirm),
-                              if (_error != null) ...[
-                                const SizedBox(height: RegisterDimens.smsErrorGap),
-                                Text(
-                                  _error!,
-                                  style: TextStyle(
-                                    fontSize: RegisterDimens.smsErrorFontSize,
-                                    color: colors.register.errorText,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
-            },
+      backgroundColor: colors.common.surface,
+      body: SafeArea(
+        bottom: false,
+        child: ListView(
+          padding: const EdgeInsets.symmetric(
+            horizontal: SmsDimens.pageHPadding,
           ),
-        ),
-      ),
-    );
-  }
-
-  InputDecoration _underlineDecoration(Color onSurface, {required String hint}) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(
-        fontSize: RegisterDimens.smsInputFontSize,
-        color: onSurface.withValues(alpha: RegisterDimens.namingHintAlpha),
-      ),
-      counterText: '',
-      border: UnderlineInputBorder(
-        borderSide: BorderSide(color: onSurface, width: 1),
-      ),
-      enabledBorder: UnderlineInputBorder(
-        borderSide: BorderSide(color: onSurface, width: 1),
-      ),
-      focusedBorder: UnderlineInputBorder(
-        borderSide: BorderSide(color: onSurface, width: 1),
-      ),
-      contentPadding: const EdgeInsets.symmetric(
-        vertical: RegisterDimens.namingInputPaddingV,
-      ),
-    );
-  }
-
-  Widget _buildPhoneInput(Color onSurface) {
-    return SizedBox(
-      width: RegisterDimens.smsInputWidth,
-      height: RegisterDimens.smsInputHeight,
-      child: TextField(
-        controller: _phoneController,
-        autofocus: true,
-        keyboardType: TextInputType.phone,
-        inputFormatters: [
-          FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(11),
-        ],
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: RegisterDimens.smsInputFontSize,
-          color: onSurface,
-        ),
-        cursorColor: onSurface,
-        onChanged: (_) => setState(() {}),
-        decoration: _underlineDecoration(onSurface, hint: '请输入手机号'),
-      ),
-    );
-  }
-
-  Widget _buildCodeRow(AppColors colors, Color onSurface, bool canSend) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        SizedBox(
-          width: RegisterDimens.smsCodeInputWidth,
-          height: RegisterDimens.smsInputHeight,
-          child: TextField(
-            controller: _codeController,
-            keyboardType: TextInputType.number,
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(6),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: IconButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: Icon(
+                  Icons.arrow_back_ios_new,
+                  size: SmsDimens.backIconSize,
+                  color: onSurface,
+                ),
+              ),
+            ),
+            const SizedBox(height: SmsDimens.titleTopGap),
+            Text(
+              '找回原用户',
+              style: TextStyle(
+                fontSize: SmsDimens.titleFontSize,
+                fontWeight: FontWeight.bold,
+                color: onSurface,
+              ),
+            ),
+            const SizedBox(height: SmsDimens.subtitleTopGap),
+            Text(
+              '使用该账户绑定的手机号验证找回；账户未绑定过手机号时，'
+              '可使用任意未被占用的手机号',
+              style: TextStyle(
+                fontSize: SmsDimens.subtitleFontSize,
+                height: SmsDimens.subtitleLineHeight,
+                color: onSurface.withValues(alpha: SmsDimens.subtitleAlpha),
+              ),
+            ),
+            const SizedBox(height: SmsDimens.formTopGap),
+            _buildPhoneBox(onSurface),
+            if (_codeSent) ...[
+              const SizedBox(height: SmsDimens.fieldGap),
+              _buildCodeBox(colors, onSurface),
             ],
-            textAlign: TextAlign.center,
+            const SizedBox(height: SmsDimens.buttonTopGap),
+            _buildPrimaryButton(
+              colors,
+              _codeSent ? '验证并找回' : '发送验证码',
+              enabled ? _onPrimary : null,
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: SmsDimens.errorTopGap),
+              Text(
+                _error!,
+                style: TextStyle(
+                  fontSize: SmsDimens.errorFontSize,
+                  color: colors.register.errorText,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 圆角描边输入框容器
+  Widget _buildBox(Color onSurface, {required Widget child}) {
+    return Container(
+      height: SmsDimens.boxHeight,
+      padding: const EdgeInsets.symmetric(horizontal: SmsDimens.boxHPadding),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(SmsDimens.boxRadius),
+        border: Border.all(
+          color: onSurface.withValues(alpha: SmsDimens.boxBorderAlpha),
+          width: SmsDimens.boxBorderWidth,
+        ),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildPhoneBox(Color onSurface) {
+    return _buildBox(
+      onSurface,
+      child: Row(
+        children: [
+          Text(
+            '+86',
             style: TextStyle(
-              fontSize: RegisterDimens.smsInputFontSize,
+              fontSize: SmsDimens.prefixFontSize,
+              fontWeight: FontWeight.w600,
               color: onSurface,
             ),
-            cursorColor: onSurface,
-            onChanged: (_) => setState(() {}),
-            decoration: _underlineDecoration(onSurface, hint: '验证码'),
           ),
-        ),
-        const SizedBox(width: RegisterDimens.smsSendGap),
-        SizedBox(
-          width: RegisterDimens.smsSendButtonWidth,
-          height: RegisterDimens.smsSendButtonHeight,
-          child: ElevatedButton(
-            onPressed: canSend ? _sendCode : null,
-            style: ButtonStyle(
-              backgroundColor: WidgetStateProperty.resolveWith((states) =>
-                  states.contains(WidgetState.disabled)
-                      ? colors.register.disabledButtonBg
-                      : colors.register.buttonBg),
-              foregroundColor: WidgetStateProperty.resolveWith((states) =>
-                  states.contains(WidgetState.disabled)
-                      ? colors.register.disabledButtonText
-                      : colors.register.buttonText),
-              shape: WidgetStateProperty.all(RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(
-                    RegisterDimens.smsSendButtonRadius),
-                side: BorderSide(
-                  color: canSend
-                      ? colors.register.buttonBorderColor
-                      : colors.register.disabledButtonBorderColor,
-                  width: RegisterDimens.smsSendButtonBorderWidth,
+          Icon(
+            Icons.expand_more,
+            size: SmsDimens.prefixIconSize,
+            color: onSurface.withValues(alpha: 0.6),
+          ),
+          const SizedBox(width: SmsDimens.prefixGap),
+          Container(
+            width: 1,
+            height: 18,
+            color: onSurface.withValues(alpha: SmsDimens.boxBorderAlpha),
+          ),
+          const SizedBox(width: SmsDimens.dividerGap),
+          Expanded(
+            child: TextField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(11),
+              ],
+              style: TextStyle(
+                fontSize: SmsDimens.fieldFontSize,
+                color: onSurface,
+              ),
+              cursorColor: onSurface,
+              decoration: InputDecoration(
+                isCollapsed: true,
+                border: InputBorder.none,
+                hintText: '请输入手机号',
+                hintStyle: TextStyle(
+                  fontSize: SmsDimens.fieldFontSize,
+                  color: onSurface.withValues(alpha: SmsDimens.hintAlpha),
                 ),
-              )),
-              padding: WidgetStateProperty.all(EdgeInsets.zero),
+              ),
             ),
-            child: _sending
-                ? SizedBox(
-                    width: RegisterDimens.loginButtonConfirmSize,
-                    height: RegisterDimens.loginButtonConfirmSize,
-                    child: CircularProgressIndicator(
-                      strokeWidth: RegisterDimens.loginButtonStrokeWidth,
-                      valueColor:
-                          AlwaysStoppedAnimation(colors.register.buttonText),
-                    ),
-                  )
-                : Text(
-                    _cooldown > 0 ? '$_cooldown s' : '发送验证码',
-                    style: TextStyle(
-                      fontSize: RegisterDimens.smsSendButtonFontSize,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  Widget _buildConfirmButton(AppColors colors, bool canConfirm) {
-    return SizedBox(
-      width: RegisterDimens.smsConfirmButtonWidth,
-      height: RegisterDimens.smsConfirmButtonHeight,
-      child: ElevatedButton(
-        onPressed: canConfirm ? _confirm : null,
-        style: ButtonStyle(
-          backgroundColor: WidgetStateProperty.resolveWith((states) =>
-              states.contains(WidgetState.disabled)
-                  ? colors.register.disabledButtonBg
-                  : colors.register.buttonBg),
-          foregroundColor: WidgetStateProperty.resolveWith((states) =>
-              states.contains(WidgetState.disabled)
-                  ? colors.register.disabledButtonText
-                  : colors.register.buttonText),
-          shape: WidgetStateProperty.all(RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(RegisterDimens.smsConfirmButtonRadius),
-            side: BorderSide(
-              color: canConfirm
-                  ? colors.register.buttonBorderColor
-                  : colors.register.disabledButtonBorderColor,
-              width: RegisterDimens.smsConfirmButtonBorderWidth,
+  Widget _buildCodeBox(AppColors colors, Color onSurface) {
+    return _buildBox(
+      onSurface,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _codeController,
+              focusNode: _codeFocusNode,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(6),
+              ],
+              style: TextStyle(
+                fontSize: SmsDimens.fieldFontSize,
+                color: onSurface,
+              ),
+              cursorColor: onSurface,
+              decoration: InputDecoration(
+                isCollapsed: true,
+                border: InputBorder.none,
+                hintText: '请输入验证码',
+                hintStyle: TextStyle(
+                  fontSize: SmsDimens.fieldFontSize,
+                  color: onSurface.withValues(alpha: SmsDimens.hintAlpha),
+                ),
+              ),
             ),
-          )),
-          padding: WidgetStateProperty.all(EdgeInsets.zero),
+          ),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: (_cooldown > 0 || _sending)
+                ? null
+                : () {
+                    _codeFocusNode.unfocus();
+                    _sendCode();
+                  },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 8,
+                vertical: 8,
+              ),
+              child: Text(
+                _cooldown > 0 ? '重新发送 $_cooldown s' : '重新发送',
+                style: TextStyle(
+                  fontSize: SmsDimens.suffixFontSize,
+                  color: _cooldown > 0
+                      ? onSurface.withValues(alpha: 0.35)
+                      : colors.postCreate.submitBg,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPrimaryButton(AppColors colors, String label, VoidCallback? onPressed) {
+    return SizedBox(
+      width: double.infinity,
+      height: SmsDimens.buttonHeight,
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: colors.postCreate.submitBg,
+          foregroundColor: colors.postCreate.submitText,
+          disabledBackgroundColor:
+              colors.postCreate.submitBg.withValues(alpha: 0.4),
+          disabledForegroundColor: colors.postCreate.submitText,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(SmsDimens.buttonRadius),
+          ),
         ),
-        child: _submitting
+        child: (_sending || _submitting)
             ? SizedBox(
-                width: RegisterDimens.loginButtonConfirmSize,
-                height: RegisterDimens.loginButtonConfirmSize,
+                width: SmsDimens.buttonSpinnerSize,
+                height: SmsDimens.buttonSpinnerSize,
                 child: CircularProgressIndicator(
-                  strokeWidth: RegisterDimens.loginButtonStrokeWidth,
+                  strokeWidth: SmsDimens.buttonSpinnerStroke,
                   valueColor:
-                      AlwaysStoppedAnimation(colors.register.buttonText),
+                      AlwaysStoppedAnimation(colors.postCreate.submitText),
                 ),
               )
             : Text(
-                '找回',
+                label,
                 style: TextStyle(
-                  fontSize: RegisterDimens.smsConfirmButtonFontSize,
+                  fontSize: SmsDimens.buttonFontSize,
                   fontWeight: FontWeight.w500,
-                  letterSpacing:
-                      RegisterDimens.loginConfirmButtonLetterSpacing,
                 ),
               ),
       ),

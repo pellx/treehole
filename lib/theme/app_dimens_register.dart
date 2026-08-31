@@ -201,44 +201,19 @@ class RegisterDimens {
   static const double loginTransferTipLineHeight = 1.5;
 
   // ── 已注册阶段（register_page registered：两个继续路径按钮同一行 + 下一行小字）──
-  static const double deviceRegisteredButtonWidth = 100;
-  static const double deviceRegisteredButtonHeight = 40;
+  static const double deviceRegisteredButtonWidth = 110;
+  static const double deviceRegisteredButtonHeight = 35;
   static const double deviceRegisteredButtonVOffset = 22;
   static const double deviceRegisteredButtonHOffset = 0;
-  static const double deviceRegisteredButtonGap = 24;
-  static const double deviceRegisteredButtonPaddingH = 4;
+  static const double deviceRegisteredButtonGap = 12;
+  static const double deviceRegisteredButtonPaddingH = 8;
   static const double deviceRegisteredButtonPaddingV = 0;
   static const double deviceRegisteredButtonRadius = 13;
   static const double deviceRegisteredButtonBorderWidth = 3;
   static const double deviceRegisteredButtonFontSize = 16;
   static const double deviceRegisteredButtonLetterSpacing = 1;
-  static const double deviceRegisteredHintVOffset = 78;
+  static const double deviceRegisteredHintVOffset = 63;
   static const double deviceRegisteredHintHOffset = 0;
   static const double deviceRegisteredHintFontSize = 12;
   static const double deviceRegisteredHintAlpha = 0.45;
-
-  // ── 手机号验证码页（sms_login / sms_register）──
-  /// 交互内容区相对垂直中心的起点
-  static const double smsContentVOffset = 25;
-  static const double smsInputWidth = 200;
-  static const double smsInputHeight = 20;
-  static const double smsInputFontSize = 15;
-  static const double smsRowGap = 14;
-  static const double smsCodeInputWidth = 110;
-  static const double smsSendGap = 10;
-  static const double smsSendButtonWidth = 86;
-  static const double smsSendButtonHeight = 27;
-  static const double smsSendButtonRadius = 11;
-  static const double smsSendButtonBorderWidth = 2;
-  static const double smsSendButtonFontSize = 13;
-  static const double smsConfirmButtonWidth = 60;
-  static const double smsConfirmButtonHeight = 27;
-  static const double smsConfirmButtonRadius = 11;
-  static const double smsConfirmButtonBorderWidth = 2;
-  static const double smsConfirmButtonFontSize = 16;
-  static const double smsErrorGap = 12;
-  static const double smsErrorFontSize = 13;
-  static const double smsCaptchaTipGap = 8;
-  static const double smsCaptchaTipFontSize = 12;
-  static const double smsCaptchaTipAlpha = 0.45;
 }
