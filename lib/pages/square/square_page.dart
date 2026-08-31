@@ -27,8 +27,7 @@ class SquarePage extends StatefulWidget {
   State<SquarePage> createState() => SquarePageState();
 }
 
-class SquarePageState extends State<SquarePage>
-    with TickerProviderStateMixin {
+class SquarePageState extends State<SquarePage> {
   List<Post> _posts = []; // 当前展示的帖子列表
   List<int> _allIds = []; // 全部帖子 ID（按 API 返回顺序）
   int _loadedCount = 0; // 已加载到第几个 ID
@@ -48,61 +47,6 @@ class SquarePageState extends State<SquarePage>
 
   /// 是否正在执行左侧刷新
   bool _leftRefreshing = false;
-
-  /// “加载中”文案是否显示：仅在释放后的加载期间显示，
-  /// 加载完成立即隐藏（缩回时无文字）。
-  bool _leftLabelVisible = false;
-
-  /// 释放触发刷新时球体的视觉抖动动画（水平来回摆动）
-  late final AnimationController _ballShakeController;
-  late final Animation<double> _ballShakeOffset;
-
-  /// 未拉满松手（或刷新结束）时球的缩回动画：
-  /// 驱动 [_leftPullDistance] 从当前值平滑回落到 0。
-  late final AnimationController _retractController;
-
-  /// 缩回动画起始时的下拉距离（缩回起点）。
-  double _retractFrom = 0;
-
-  void _initBallShake() {
-    _ballShakeController = AnimationController(
-      vsync: this,
-      duration: AppSquareRefreshTheme.ballShakeDuration,
-    );
-    final amp = AppSquareRefreshTheme.ballShakeAmplitude;
-    _ballShakeOffset = TweenSequence<double>([
-      TweenSequenceItem(tween: Tween(begin: 0.0, end: -amp), weight: 1),
-      TweenSequenceItem(tween: Tween(begin: -amp, end: amp), weight: 2),
-      TweenSequenceItem(tween: Tween(begin: amp, end: -amp), weight: 2),
-      TweenSequenceItem(tween: Tween(begin: -amp, end: amp), weight: 2),
-      TweenSequenceItem(tween: Tween(begin: amp, end: 0.0), weight: 1),
-    ]).animate(_ballShakeController);
-  }
-
-  void _initBallRetract() {
-    _retractController = AnimationController(
-      vsync: this,
-      duration: AppSquareRefreshTheme.ballRetractDuration,
-    )..addListener(() {
-        if (!mounted) return;
-        setState(() {
-          _leftPullDistance =
-              _retractFrom *
-              (1 -
-                  Curves.easeOutCubic.transform(
-                    _retractController.value,
-                  ));
-        });
-      });
-  }
-
-  /// 未拉满松手（或刷新结束）时，让球平滑缩回顶栏下方而不是直接消失。
-  void _animateLeftRetract() {
-    if (_leftPullDistance == 0) return;
-    _retractController.stop();
-    _retractFrom = _leftPullDistance;
-    _retractController.forward(from: 0);
-  }
 
   final _scrollController = ScrollController();
 
@@ -165,36 +109,26 @@ class SquarePageState extends State<SquarePage>
     if (_leftPullProgress >= 1.0) {
       _triggerLeftRefresh();
     } else if (_leftPullDistance != 0 || _leftPullHapticTriggered) {
-      // 未拉满松手：球平滑缩回，而不是直接消失
-      _leftPullHapticTriggered = false;
-      _animateLeftRetract();
+      // 状态未变化时（如纯点击）不重建，避免多余的开销
+      setState(() {
+        _leftPullDistance = 0;
+        _leftPullHapticTriggered = false;
+      });
     }
   }
 
   Future<void> _triggerLeftRefresh() async {
-    // 释放触发刷新：可选触觉 + 球体循环抖动（加载期间持续）
-    AppSquareRefreshTheme.hapticOnRefresh.trigger();
-    if (_ballShakeController.isAnimating) _ballShakeController.stop();
-    _ballShakeController
-      ..value = 0
-      ..repeat();
     setState(() {
       _leftRefreshing = true;
-      _leftLabelVisible = true;
       _leftPullDistance = AppSquareRefreshTheme.pullThreshold;
       _leftPullHapticTriggered = false;
     });
     await _refresh();
     if (mounted) {
-      // 加载完成：停止循环抖动并归位（offset 回到 0）。
-      // 文字立即消失（缩回时无文字）；球保持 puton 图不再切回 waiting
-      // （避免刷新很快时出现闪烁），随缩回动画一起消失。
-      _ballShakeController.stop();
-      _ballShakeController.value = 1.0;
       setState(() {
-        _leftLabelVisible = false;
+        _leftRefreshing = false;
+        _leftPullDistance = 0;
       });
-      _animateLeftRetract();
     }
   }
 
@@ -208,8 +142,6 @@ class SquarePageState extends State<SquarePage>
   @override
   void initState() {
     super.initState();
-    _initBallShake();
-    _initBallRetract();
     _initLoad();
     ImageOverlay.onChanged = () {
       if (mounted) setState(() {});
@@ -218,8 +150,6 @@ class SquarePageState extends State<SquarePage>
 
   @override
   void dispose() {
-    _ballShakeController.dispose();
-    _retractController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -697,18 +627,10 @@ class SquarePageState extends State<SquarePage>
     );
   }
 
-  /// 顶部下拉刷新球外壳：列表置顶时，任意位置向下拉都会唤出顶栏下方的刷新球
+  /// 顶部下拉刷新球外壳：列表置顶时，任意位置向下拉都会唤出左上角刷新球
   Widget _buildRefreshShell(Widget child) {
     final colors = Theme.of(context).extension<AppColors>()!;
     final progress = _leftPullProgress;
-    // 本层坐标原点 = 顶栏底边：拉满时球顶边停在 y = ballMaxDropDistance
-    final ballTop =
-        -AppSquareRefreshTheme.ballSize +
-        (AppSquareRefreshTheme.ballSize +
-                AppSquareTopBarTheme.height +
-                AppSquareRefreshTheme.ballMaxDropDistance) *
-            progress -
-        AppSquareTopBarTheme.height;
 
     return Stack(
       children: [
@@ -731,17 +653,7 @@ class SquarePageState extends State<SquarePage>
                       instance.onStart = () {
                         // 只在手势开始时重置内部状态，不要 setState，
                         // 否则每次在顶部点击（如切换 tab）都会触发重建，导致 tab 点击失效。
-                        // 若上一轮缩回动画仍在进行，先停掉，避免动画回写距离。
-                        _retractController.stop();
-                        // 新一轮下拉开始：停止上一轮的循环抖动并归位
-                        // （控制器通知会触发球体重建，无需 setState）。
-                        _ballShakeController.stop();
-                        _ballShakeController.value = 1.0;
                         _leftPullDistance = 0;
-                        // 球回到 waiting 图（首次 onMove 的 setState
-                        // 会带着这个状态重建）。
-                        _leftRefreshing = false;
-                        _leftLabelVisible = false;
                         _leftPullHapticTriggered = false;
                       };
                       instance.onMove = (cumulativeDy) {
@@ -749,7 +661,7 @@ class SquarePageState extends State<SquarePage>
                           _leftPullDistance = cumulativeDy;
                           if (_leftPullProgress >= 1.0 &&
                               !_leftPullHapticTriggered) {
-                            AppSquareRefreshTheme.hapticOnArmed.trigger();
+                            HapticFeedback.mediumImpact();
                             _leftPullHapticTriggered = true;
                           }
                         });
@@ -760,87 +672,52 @@ class SquarePageState extends State<SquarePage>
             },
           ),
         ),
-        // 刷新球：下拉起始位置不变——从顶栏上方竖直滑下，滑过顶栏区域时
-        // 被顶栏遮盖（不盖住顶栏、无透明度渐变），从顶栏底边下方露出；
-        // 拉满时球顶边停在顶栏底边下方 ballMaxDropDistance 处。
         Positioned(
-          left: 0,
-          right: 0,
-          top: AppSquareTopBarTheme.height,
-          bottom: 0,
-          child: ClipRect(
-            child: Stack(
-              children: [
-                // “加载中”文案：位于球左侧、与球竖直居中对齐；
-                // 独立定位不随球抖动，加载完成立即消失（缩回时无文字）。
-                Positioned(
-                  right:
-                      AppSquareRefreshTheme.ballRightFinalInset +
-                      AppSquareRefreshTheme.ballSize +
-                      AppSquareRefreshTheme.loadingLabelGap,
-                  top: ballTop,
-                  height: AppSquareRefreshTheme.ballSize,
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Visibility(
-                      visible: _leftLabelVisible,
-                      child: Text(
-                        AppSquareRefreshTheme.loadingLabelText,
-                        style: TextStyle(
-                          fontSize: AppSquareRefreshTheme
-                              .loadingLabelFontSize,
-                          fontWeight: AppSquareRefreshTheme
-                              .loadingLabelFontWeight,
-                          color: AppSquareRefreshTheme.loadingLabelColor,
-                        ),
-                      ),
+          left:
+              -AppSquareRefreshTheme.ballSize +
+              (AppSquareRefreshTheme.ballSize +
+                      AppSquareRefreshTheme.ballLeftFinalInset) *
+                  progress,
+          top:
+              -AppSquareRefreshTheme.ballSize +
+              (AppSquareRefreshTheme.ballSize +
+                      AppSquareRefreshTheme.ballTopFinalInset) *
+                  progress,
+          child: Opacity(
+            opacity: progress,
+            child: Container(
+              width: AppSquareRefreshTheme.ballSize,
+              height: AppSquareRefreshTheme.ballSize,
+              decoration: BoxDecoration(
+                color: colors.common.surface,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.common.onSurface.withValues(
+                      alpha: AppSquareRefreshTheme.shadowOpacity,
                     ),
+                    blurRadius: 8,
+                    offset: const Offset(2, 2),
                   ),
-                ),
-                Positioned(
-                  // 水平固定在右侧
-                  right: AppSquareRefreshTheme.ballRightFinalInset,
-                  top: ballTop,
-                  child: AnimatedBuilder(
-                    animation: _ballShakeController,
-                    // 释放后球体水平抖动（文案不跟随）
-                    builder: (context, child) => Transform.translate(
-                      offset: Offset(_ballShakeOffset.value, 0),
-                      child: child,
-                    ),
-                    child: Container(
-                      width: AppSquareRefreshTheme.ballSize,
-                      height: AppSquareRefreshTheme.ballSize,
-                      decoration: BoxDecoration(
-                        color: colors.common.surface,
-                        shape: BoxShape.circle,
-                        // 绿色边框圆球：未释放显示 waiting 图，释放刷新切换 puton 图
-                        border: Border.all(
-                          color: AppSquareRefreshTheme.ballBorderColor,
-                          width: AppSquareRefreshTheme.ballBorderWidth,
+                ],
+              ),
+              child: Center(
+                child: _leftRefreshing
+                    ? SizedBox(
+                        width: AppSquareRefreshTheme.indicatorSize,
+                        height: AppSquareRefreshTheme.indicatorSize,
+                        child: CircularProgressIndicator(
+                          strokeWidth:
+                              AppSquareRefreshTheme.indicatorStrokeWidth,
+                          color: colors.common.green,
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: colors.common.onSurface.withValues(
-                              alpha: AppSquareRefreshTheme.shadowOpacity,
-                            ),
-                            blurRadius: 8,
-                            offset: const Offset(2, 2),
-                          ),
-                        ],
-                        image: DecorationImage(
-                          image: AssetImage(
-                            _leftRefreshing
-                                ? AppSquareRefreshTheme.putonImage
-                                : AppSquareRefreshTheme.waitingImage,
-                          ),
-                          fit: AppSquareRefreshTheme.ballImageFit,
-                        ),
+                      )
+                    : Icon(
+                        Icons.refresh,
+                        size: AppSquareRefreshTheme.iconSize,
+                        color: colors.common.green,
                       ),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
