@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
@@ -29,8 +30,34 @@ class ImageOverlay extends StatefulWidget {
 
   static OverlayEntry? currentEntry;
   static void Function()? _onClose;
-  static VoidCallback? onChanged;
   static void closeCurrent() => _onClose?.call();
+
+  /// 预览开/关状态。承载预览的页面把它作为 LivePopScope 的
+  /// recomputeTrigger 使用：预览打开期间返回手势/返回键被拦截为「先关预览」，
+  /// 不依赖页面重建时机
+  static final ValueNotifier<bool> isOpen = ValueNotifier<bool>(false);
+
+  /// 从图片字节解析尺寸（仅读文件头，不做完整像素解码），
+  /// 作为 photo_view customChild 的 childSize
+  static Future<Size?> resolveImageSize(Uint8List bytes) async {
+    try {
+      final ui.ImmutableBuffer buffer = await ui.ImmutableBuffer.fromUint8List(
+        bytes,
+      );
+      final ui.ImageDescriptor descriptor = await ui.ImageDescriptor.encoded(
+        buffer,
+      );
+      final Size size = Size(
+        descriptor.width.toDouble(),
+        descriptor.height.toDouble(),
+      );
+      descriptor.dispose();
+      buffer.dispose();
+      return size;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static Future<Uint8List?> downloadPng(String fileName) async {
     try {
@@ -64,6 +91,7 @@ class _ImageOverlayState extends State<ImageOverlay>
   final Map<int, AnimationController> _fadeCtrls = {};
   final List<AnimationController> _pendingFades = [];
   final Map<int, bool> _pngReady = {};
+  final Map<int, Size> _childSizes = {};
 
   @override
   void initState() {
@@ -110,18 +138,14 @@ class _ImageOverlayState extends State<ImageOverlay>
         ImageOverlay.currentEntry?.remove();
         ImageOverlay.currentEntry = null;
         ImageOverlay._onClose = null;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          ImageOverlay.onChanged?.call();
-        });
+        ImageOverlay.isOpen.value = false;
       }
     });
     _animCtrl.addListener(() {
       if (mounted) setState(() {});
     });
     ImageOverlay._onClose = _close;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ImageOverlay.onChanged?.call();
-    });
+    ImageOverlay.isOpen.value = true;
 
     // 预加载相邻图
     if (widget.initialIndex + 1 < widget.images.length) {
@@ -190,6 +214,15 @@ class _ImageOverlayState extends State<ImageOverlay>
     setState(() {
       _pngCache[index] = bytes;
       _pngReady[index] = false;
+    });
+    _resolveChildSize(index, bytes);
+  }
+
+  void _resolveChildSize(int index, Uint8List bytes) {
+    if (_childSizes.containsKey(index)) return;
+    ImageOverlay.resolveImageSize(bytes).then((size) {
+      if (!mounted || size == null) return;
+      setState(() => _childSizes[index] = size);
     });
   }
 
@@ -280,10 +313,11 @@ class _ImageOverlayState extends State<ImageOverlay>
     final progress = _expandAnim.value;
     final rect = Rect.lerp(startR, fullRect, progress)!;
 
-    return PopScope(
-      canPop: ImageOverlay.currentEntry == null,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop) return;
+    // 本组件是 OverlayEntry（无 ModalRoute 祖先），PopScope 在此不生效；
+    // 返回键/返回手势的拦截由承载页监听 ImageOverlay.isOpen 后以 PopScope 完成
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () {
         if (_showActionBar) {
           setState(() => _showActionBar = false);
           _actionBarCtrl.reverse();
@@ -291,161 +325,150 @@ class _ImageOverlayState extends State<ImageOverlay>
           _close();
         }
       },
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () {
-          if (_showActionBar) {
-            setState(() => _showActionBar = false);
-            _actionBarCtrl.reverse();
-          } else {
-            _close();
-          }
-        },
-        onLongPress: () {
-          setState(() => _showActionBar = true);
-          _actionBarCtrl.duration = Duration(
-            milliseconds: AppDimens.actionBarAnimMs,
-          );
-          _actionBarCtrl.forward();
-        },
-        child: Stack(
-          children: [
-            Positioned.fill(child: Container(color: _bgAnim.value)),
+      onLongPress: () {
+        setState(() => _showActionBar = true);
+        _actionBarCtrl.duration = Duration(
+          milliseconds: AppDimens.actionBarAnimMs,
+        );
+        _actionBarCtrl.forward();
+      },
+      child: Stack(
+        children: [
+          Positioned.fill(child: Container(color: _bgAnim.value)),
+          Positioned(
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            child: ClipRRect(
+              borderRadius: progress < 1
+                  ? BorderRadius.circular(4 * (1 - progress))
+                  : BorderRadius.zero,
+              child: _buildContent(),
+            ),
+          ),
+          if (widget.images.length > 1)
             Positioned(
-              left: rect.left,
-              top: rect.top,
-              width: rect.width,
-              height: rect.height,
-              child: ClipRRect(
-                borderRadius: progress < 1
-                    ? BorderRadius.circular(4 * (1 - progress))
-                    : BorderRadius.zero,
-                child: _buildContent(),
+              bottom: AppDimens.pageIndicatorBottomMargin,
+              left: 0,
+              right: 0,
+              child: FadeTransition(
+                opacity: _dotsCtrl,
+                child: Center(
+                  child: Wrap(
+                    spacing: AppDimens.pageIndicatorDotGap,
+                    runSpacing: 0,
+                    children: List.generate(widget.images.length, (i) {
+                      final active = i == _currentIndex;
+                      return Container(
+                        width: AppDimens.pageIndicatorDotSize,
+                        height: AppDimens.pageIndicatorDotSize,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: colors.common.overlayPageDot.withValues(
+                            alpha: active
+                                ? AppDimens.overlayPageDotActiveOpacity
+                                : AppDimens.overlayPageDotInactiveOpacity,
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
               ),
             ),
-            if (widget.images.length > 1)
-              Positioned(
-                bottom: AppDimens.pageIndicatorBottomMargin,
-                left: 0,
-                right: 0,
-                child: FadeTransition(
-                  opacity: _dotsCtrl,
-                  child: Center(
-                    child: Wrap(
-                      spacing: AppDimens.pageIndicatorDotGap,
-                      runSpacing: 0,
-                      children: List.generate(widget.images.length, (i) {
-                        final active = i == _currentIndex;
-                        return Container(
-                          width: AppDimens.pageIndicatorDotSize,
-                          height: AppDimens.pageIndicatorDotSize,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: colors.common.overlayPageDot.withValues(
-                              alpha: active
-                                  ? AppDimens.overlayPageDotActiveOpacity
-                                  : AppDimens.overlayPageDotInactiveOpacity,
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  ),
-                ),
-              ),
-            if (_showActionBar || _actionBarCtrl.value > 0)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: _showActionBar
-                    ? -AppDimens.actionBarHeight +
-                          _actionBarCtrl.value *
-                              (AppDimens.actionBarBottomMargin +
-                                  AppDimens.actionBarHeight)
-                    : AppDimens.actionBarBottomMargin,
-                child: Opacity(
-                  opacity: _actionBarCtrl.value,
-                  child: Center(
-                    child: Container(
-                      height: AppDimens.actionBarHeight,
-                      decoration: BoxDecoration(
-                        color: colors.common.overlayActionBarBg,
-                        borderRadius: BorderRadius.circular(
-                          AppDimens.actionBarRadius,
-                        ),
+          if (_showActionBar || _actionBarCtrl.value > 0)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: _showActionBar
+                  ? -AppDimens.actionBarHeight +
+                        _actionBarCtrl.value *
+                            (AppDimens.actionBarBottomMargin +
+                                AppDimens.actionBarHeight)
+                  : AppDimens.actionBarBottomMargin,
+              child: Opacity(
+                opacity: _actionBarCtrl.value,
+                child: Center(
+                  child: Container(
+                    height: AppDimens.actionBarHeight,
+                    decoration: BoxDecoration(
+                      color: colors.common.overlayActionBarBg,
+                      borderRadius: BorderRadius.circular(
+                        AppDimens.actionBarRadius,
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(width: AppDimens.actionBarBtnGap),
-                          IconButton(
-                            icon: _saving
-                                ? SizedBox(
-                                    width: AppDimens.actionBarBtnSize,
-                                    height: AppDimens.actionBarBtnSize,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: colors.common.overlayIcon,
-                                    ),
-                                  )
-                                : Icon(
-                                    Icons.download,
-                                    size: AppDimens.actionBarBtnSize,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(width: AppDimens.actionBarBtnGap),
+                        IconButton(
+                          icon: _saving
+                              ? SizedBox(
+                                  width: AppDimens.actionBarBtnSize,
+                                  height: AppDimens.actionBarBtnSize,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
                                     color: colors.common.overlayIcon,
                                   ),
-                            onPressed: _saveImage,
-                          ),
-                          SizedBox(width: AppDimens.actionBarBtnGap),
-                          IconButton(
-                            icon: Icon(
-                              Icons.share,
-                              size: AppDimens.actionBarBtnSize,
-                              color: colors.common.overlayIcon,
-                            ),
-                            onPressed: _shareImage,
-                          ),
-                          SizedBox(width: AppDimens.actionBarBtnGap),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_saveToastCtrl.value > 0)
-              Positioned(
-                bottom: AppDimens.saveToastBottomMargin,
-                left: 0,
-                right: 0,
-                child: Opacity(
-                  opacity: _saveToastCtrl.value,
-                  child: Center(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: AppDimens.saveToastHPadding,
-                          vertical: AppDimens.saveToastVPadding,
+                                )
+                              : Icon(
+                                  Icons.download,
+                                  size: AppDimens.actionBarBtnSize,
+                                  color: colors.common.overlayIcon,
+                                ),
+                          onPressed: _saveImage,
                         ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.55),
-                          borderRadius: BorderRadius.circular(
-                            AppDimens.saveToastRadius,
-                          ),
-                        ),
-                        child: Text(
-                          '已保存至相册',
-                          style: TextStyle(
-                            fontSize: AppDimens.saveToastFontSize,
+                        SizedBox(width: AppDimens.actionBarBtnGap),
+                        IconButton(
+                          icon: Icon(
+                            Icons.share,
+                            size: AppDimens.actionBarBtnSize,
                             color: colors.common.overlayIcon,
                           ),
+                          onPressed: _shareImage,
+                        ),
+                        SizedBox(width: AppDimens.actionBarBtnGap),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_saveToastCtrl.value > 0)
+            Positioned(
+              bottom: AppDimens.saveToastBottomMargin,
+              left: 0,
+              right: 0,
+              child: Opacity(
+                opacity: _saveToastCtrl.value,
+                child: Center(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: AppDimens.saveToastHPadding,
+                        vertical: AppDimens.saveToastVPadding,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(
+                          AppDimens.saveToastRadius,
+                        ),
+                      ),
+                      child: Text(
+                        '已保存至相册',
+                        style: TextStyle(
+                          fontSize: AppDimens.saveToastFontSize,
+                          color: colors.common.overlayIcon,
                         ),
                       ),
                     ),
                   ),
                 ),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -474,44 +497,57 @@ class _ImageOverlayState extends State<ImageOverlay>
             ? widget.thumbnails[index]
             : null;
         final fadeCtrl = _fadeCtrls[index];
+        final childSize = _childSizes[index];
 
         return PhotoViewGalleryPageOptions.customChild(
-          child: Stack(
-            fit: StackFit.passthrough,
-            children: [
-              if (hasPng)
-                Align(
-                  child: Image.memory(
-                    png,
-                    width: double.infinity,
-                    fit: BoxFit.contain,
-                    frameBuilder:
-                        (context, child, frame, wasSynchronouslyLoaded) {
-                          if (frame != null) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              _onPngFrameReady(index);
-                            });
-                          }
-                          return child;
-                        },
-                  ),
-                ),
-              if (thumb != null)
-                Align(
-                  child: Opacity(
-                    opacity: hasPng
-                        ? (fadeCtrl != null ? 1 - fadeCtrl.value : 0)
-                        : 1,
+          // 不传 childSize 时 photo_view 以视口尺寸兜底，
+          // contained 与 covered 都会算成 1.0，双击缩放等于原地不动
+          childSize: childSize,
+          // 双击循环：非原始显示状态（含捏合缩放中）一律恢复原始大小，
+          // 原始大小则放大到铺满屏幕
+          scaleStateCycle: (actual) => actual == PhotoViewScaleState.initial
+              ? PhotoViewScaleState.covering
+              : PhotoViewScaleState.initial,
+          child: SizedBox(
+            width: childSize?.width,
+            height: childSize?.height,
+            child: Stack(
+              fit: StackFit.passthrough,
+              children: [
+                if (hasPng)
+                  Align(
                     child: Image.memory(
-                      thumb,
+                      png,
                       width: double.infinity,
                       fit: BoxFit.contain,
+                      frameBuilder:
+                          (context, child, frame, wasSynchronouslyLoaded) {
+                            if (frame != null) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                _onPngFrameReady(index);
+                              });
+                            }
+                            return child;
+                          },
                     ),
                   ),
-                ),
-              if (thumb == null && !hasPng)
-                const Center(child: SizedBox.shrink()),
-            ],
+                if (thumb != null)
+                  Align(
+                    child: Opacity(
+                      opacity: hasPng
+                          ? (fadeCtrl != null ? 1 - fadeCtrl.value : 0)
+                          : 1,
+                      child: Image.memory(
+                        thumb,
+                        width: double.infinity,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                if (thumb == null && !hasPng)
+                  const Center(child: SizedBox.shrink()),
+              ],
+            ),
           ),
           minScale: PhotoViewComputedScale.contained,
           maxScale: PhotoViewComputedScale.covered * 3,

@@ -13,6 +13,7 @@ import '../../theme/app_dimens.dart';
 import '../../theme/app_square_refresh_theme.dart';
 import '../../theme/app_square_top_bar_theme.dart';
 import '../../widgets/image_overlay.dart';
+import '../../widgets/live_pop_scope.dart';
 import '../search/search_page.dart';
 import '../../widgets/post_card.dart';
 import '../../widgets/app_error_state.dart';
@@ -143,9 +144,6 @@ class SquarePageState extends State<SquarePage> {
   void initState() {
     super.initState();
     _initLoad();
-    ImageOverlay.onChanged = () {
-      if (mounted) setState(() {});
-    };
   }
 
   @override
@@ -490,27 +488,27 @@ class SquarePageState extends State<SquarePage> {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         statusBarColor: topBarBg,
-        statusBarIconBrightness:
-            isLight ? Brightness.dark : Brightness.light,
+        statusBarIconBrightness: isLight ? Brightness.dark : Brightness.light,
       ),
-      child: PopScope(
-        canPop: ImageOverlay.currentEntry == null,
+      child: LivePopScope(
+        recomputeTrigger: ImageOverlay.isOpen,
+        canPop: () => ImageOverlay.currentEntry == null,
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) ImageOverlay.closeCurrent();
         },
         child: Scaffold(
-        // 回复栏是 OverlayEntry，键盘弹出时不需要 resize 底层列表，避免底边栏被顶动
-        resizeToAvoidBottomInset: false,
-        body: Container(
-          color: topBarBg,
-          child: SafeArea(
-            bottom: false,
-            child: _buildRefreshShell(_buildBody()),
+          // 回复栏是 OverlayEntry，键盘弹出时不需要 resize 底层列表，避免底边栏被顶动
+          resizeToAvoidBottomInset: false,
+          body: Container(
+            color: topBarBg,
+            child: SafeArea(
+              bottom: false,
+              child: _buildRefreshShell(_buildBody()),
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   Widget _buildBody() {

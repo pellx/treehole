@@ -14,6 +14,8 @@ import '../../widgets/app_confirm_dialog.dart';
 import '../../widgets/app_empty_state.dart';
 import '../../widgets/app_error_state.dart';
 import '../../widgets/app_loading_indicator.dart';
+import '../../widgets/image_overlay.dart';
+import '../../widgets/live_pop_scope.dart';
 import '../../widgets/post_card.dart';
 
 /// 搜索页：顶部输入栏 + 搜索历史
@@ -343,47 +345,53 @@ class _SearchPageState extends State<SearchPage> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final isLight = Theme.of(context).brightness == Brightness.light;
 
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle(
-        statusBarColor: colors.common.surface,
-        statusBarIconBrightness:
-            isLight ? Brightness.dark : Brightness.light,
-      ),
-      child: Scaffold(
-        backgroundColor: colors.common.background,
-        resizeToAvoidBottomInset: true,
-        body: SafeArea(
-          bottom: false,
-          child: Column(
-            children: [
-              _buildSearchBar(colors, onSurface),
-              if (_query.isNotEmpty || _searchCommitted)
-                _buildCategoryBar(colors, onSurface),
-              _buildSearchHistory(colors, onSurface),
-              Expanded(
-                child: Stack(
-                  children: [
-                    GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () {
-                        if (_filterPanelExpanded) {
-                          setState(() => _filterPanelExpanded = false);
-                        }
-                      },
-                      child: _buildBody(colors),
-                    ),
-                    if ((_query.isNotEmpty || _searchCommitted) &&
-                        _filterPanelExpanded)
-                      Positioned(
-                        top: AppSearchTheme.filterPanelOverlayTop,
-                        left: AppSearchTheme.filterPanelOverlayLeft,
-                        right: AppSearchTheme.filterPanelOverlayRight,
-                        child: _buildFilterPanel(colors, onSurface),
+    return LivePopScope(
+      recomputeTrigger: ImageOverlay.isOpen,
+      canPop: () => ImageOverlay.currentEntry == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) ImageOverlay.closeCurrent();
+      },
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: SystemUiOverlayStyle(
+          statusBarColor: colors.common.surface,
+          statusBarIconBrightness: isLight ? Brightness.dark : Brightness.light,
+        ),
+        child: Scaffold(
+          backgroundColor: colors.common.background,
+          resizeToAvoidBottomInset: true,
+          body: SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                _buildSearchBar(colors, onSurface),
+                if (_query.isNotEmpty || _searchCommitted)
+                  _buildCategoryBar(colors, onSurface),
+                _buildSearchHistory(colors, onSurface),
+                Expanded(
+                  child: Stack(
+                    children: [
+                      GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: () {
+                          if (_filterPanelExpanded) {
+                            setState(() => _filterPanelExpanded = false);
+                          }
+                        },
+                        child: _buildBody(colors),
                       ),
-                  ],
+                      if ((_query.isNotEmpty || _searchCommitted) &&
+                          _filterPanelExpanded)
+                        Positioned(
+                          top: AppSearchTheme.filterPanelOverlayTop,
+                          left: AppSearchTheme.filterPanelOverlayLeft,
+                          right: AppSearchTheme.filterPanelOverlayRight,
+                          child: _buildFilterPanel(colors, onSurface),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
