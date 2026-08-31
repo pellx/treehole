@@ -75,16 +75,3 @@ void navigateToSettingsPage(BuildContext context, String title, Widget body) {
     transitionDuration: Duration(milliseconds: AppDimens.drawerAnimMs),
   ));
 }
-
-/// 右侧滑入路由（正式子页，如手机号验证码页）
-Route<T> rightSlideRoute<T>(Widget page) {
-  return PageRouteBuilder<T>(
-    pageBuilder: (_, __, ___) => page,
-    transitionsBuilder: (_, animation, __, child) => SlideTransition(
-      position: Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
-          .animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
-      child: child,
-    ),
-    transitionDuration: Duration(milliseconds: AppDimens.drawerAnimMs),
-  );
-}

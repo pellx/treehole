@@ -680,18 +680,20 @@ class _RegisterPageState extends State<RegisterPage> {
     );
   }
 
-  /// 已注册阶段：手机号找回 / 手机号注册新账号（右侧滑入的正式子页）。
+  /// 已注册阶段：手机号找回 / 手机号注册新账号（默认路由，右侧滑入子页）。
   /// 子页 pop(true) 表示找回/注册成功，本页与 RegisterPage 其余流程一样
   /// 直接退出回到进入前的页面；取消则停留在本阶段可换另一条路径。
   Future<void> _openSmsLogin() async {
-    final ok =
-        await Navigator.of(context).push<bool>(rightSlideRoute<bool>(const SmsLoginPage()));
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const SmsLoginPage()),
+    );
     if (ok == true && mounted) Navigator.pop(context);
   }
 
   Future<void> _openSmsRegister() async {
-    final ok = await Navigator.of(context)
-        .push<bool>(rightSlideRoute<bool>(const SmsRegisterPage()));
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => const SmsRegisterPage()),
+    );
     if (ok == true && mounted) Navigator.pop(context);
   }
 
