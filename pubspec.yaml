@@ -1,7 +1,7 @@
 name: treehole
 description: 树通 - 学生的匿名论坛
 publish_to: 'none'
-version: 1.0.1+4
+version: 1.1.0+5
 
 environment:
   sdk: ^3.8.0
