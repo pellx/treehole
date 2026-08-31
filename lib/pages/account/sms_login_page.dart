@@ -26,6 +26,7 @@ class SmsLoginPage extends StatefulWidget {
 
 class _SmsLoginPageState extends State<SmsLoginPage> {
   final _phoneController = TextEditingController();
+  final _phoneFocusNode = FocusNode();
   final _codeController = TextEditingController();
   final _codeFocusNode = FocusNode();
 
@@ -47,12 +48,18 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
     _codeController.addListener(() {
       if (mounted) setState(() {});
     });
+    // 右侧滑入动画结束后再唤起键盘，避免转场与键盘动画打架
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.delayed(const Duration(milliseconds: 350));
+      if (mounted) _phoneFocusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _cooldownTimer?.cancel();
     _phoneController.dispose();
+    _phoneFocusNode.dispose();
     _codeController.dispose();
     _codeFocusNode.dispose();
     super.dispose();
@@ -224,6 +231,11 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
               alignment: Alignment.centerLeft,
               child: IconButton(
                 onPressed: () => Navigator.of(context).maybePop(),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 36,
+                ),
                 icon: Icon(
                   Icons.arrow_back_ios_new,
                   size: SmsDimens.backIconSize,
@@ -322,6 +334,7 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
           Expanded(
             child: TextField(
               controller: _phoneController,
+              focusNode: _phoneFocusNode,
               keyboardType: TextInputType.phone,
               inputFormatters: [
                 FilteringTextInputFormatter.digitsOnly,

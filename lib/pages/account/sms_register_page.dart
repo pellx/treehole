@@ -30,6 +30,7 @@ class SmsRegisterPage extends StatefulWidget {
 
 class _SmsRegisterPageState extends State<SmsRegisterPage> {
   final _phoneController = TextEditingController();
+  final _phoneFocusNode = FocusNode();
   final _codeController = TextEditingController();
   final _nameController = TextEditingController();
   final _codeFocusNode = FocusNode();
@@ -54,12 +55,18 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     _phoneController.addListener(() => _onTextChanged());
     _codeController.addListener(() => _onTextChanged());
     _nameController.addListener(() => _onTextChanged());
+    // 右侧滑入动画结束后再唤起键盘，避免转场与键盘动画打架
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.delayed(const Duration(milliseconds: 350));
+      if (mounted) _phoneFocusNode.requestFocus();
+    });
     _preFetchPow();
   }
 
   @override
   void dispose() {
     _phoneController.dispose();
+    _phoneFocusNode.dispose();
     _codeController.dispose();
     _nameController.dispose();
     _codeFocusNode.dispose();
@@ -303,6 +310,11 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
               alignment: Alignment.centerLeft,
               child: IconButton(
                 onPressed: () => Navigator.of(context).maybePop(),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 36,
+                ),
                 icon: Icon(
                   Icons.arrow_back_ios_new,
                   size: SmsDimens.backIconSize,
@@ -406,6 +418,7 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
           Expanded(
             child: TextField(
               controller: _phoneController,
+              focusNode: _phoneFocusNode,
               keyboardType: TextInputType.phone,
               inputFormatters: [
                 FilteringTextInputFormatter.digitsOnly,
