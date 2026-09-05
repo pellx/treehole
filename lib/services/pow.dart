@@ -23,6 +23,14 @@ class PoWChallenge {
   }
 }
 
+/// PoW 求解结果（challenge_id + nonce），提交给后端验证
+class PoWResult {
+  final String challengeId;
+  final int nonce;
+
+  const PoWResult({required this.challengeId, required this.nonce});
+}
+
 class PoWService {
   static const _timeout = Duration(seconds: 30);
   static const _maxIterations = 200_000_000;
