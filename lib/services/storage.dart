@@ -151,7 +151,9 @@ class PostStorage {
       'is_anonymous': post.isAnonymous,
       'created_at': post.createdAt,
       'update_at': post.updateAt,
-      'images': post.images.map((e) => {'file_name': e.fileName}).toList(),
+      'images': post.images
+          .map((e) => {'file_name': e.fileName, 'width': e.width, 'height': e.height})
+          .toList(),
       'attachments': post.attachments
           .map((e) => {'file_name': e.fileName, 'source_name': e.sourceName})
           .toList(),

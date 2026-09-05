@@ -362,6 +362,8 @@ class _PostCardState extends State<PostCard> {
               fileName: post.images[0].fileName,
               fit: BoxFit.contain,
               constrainSingle: true,
+              apiWidth: post.images[0].width,
+              apiHeight: post.images[0].height,
             ),
           ),
         ),
@@ -1422,11 +1424,15 @@ class ThumbnailImage extends StatefulWidget {
   final String fileName;
   final BoxFit fit;
   final bool constrainSingle;
+  final int apiWidth;
+  final int apiHeight;
   const ThumbnailImage({
     super.key,
     required this.fileName,
     this.fit = BoxFit.cover,
     this.constrainSingle = false,
+    this.apiWidth = 0,
+    this.apiHeight = 0,
   });
 
   @override
@@ -1448,8 +1454,22 @@ class _ThumbnailImageState extends State<ThumbnailImage> {
 
   void _initDims() {
     if (!widget.constrainSingle) return;
+    if (widget.apiWidth > 0 && widget.apiHeight > 0) {
+      _calcDisplaySizeFromApi();
+      return;
+    }
     final data = PostStorage.getThumbnail(widget.fileName);
     if (data != null) _calcDisplaySize(data);
+  }
+
+  void _calcDisplaySizeFromApi() {
+    final ratio = (widget.apiWidth / widget.apiHeight).clamp(
+      AppDimens.singleImageMinRatio,
+      AppDimens.singleImageMaxRatio,
+    );
+    final h = sqrt(AppDimens.singleImageMaxArea / ratio);
+    _displayH = h;
+    _displayW = ratio * h;
   }
 
   void _calcDisplaySize(ThumbnailData data) {

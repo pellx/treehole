@@ -115,7 +115,7 @@ class SquarePageState extends State<SquarePage> with SquarePageStateMixin {
       color: colors.common.background,
       child: NotificationListener<ScrollNotification>(
         onNotification: (n) {
-          if (n.metrics.pixels >= n.metrics.maxScrollExtent - 300 &&
+          if (n.metrics.pixels >= n.metrics.maxScrollExtent - 1500 &&
               !_loading) {
             _loadMore();
           }

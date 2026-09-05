@@ -81,7 +81,7 @@ class _SearchPageState extends State<SearchPage> {
   Future<void> _refreshPostComments(Post post) async {
     List<int> newIds;
     try {
-      final fresh = await ApiService.getPost(post.id);
+      final fresh = await ApiService.getPostV2(post.id);
       if (fresh != null) {
         await PostStorage.savePost(fresh);
         final idx = _posts.indexWhere((p) => p.id == post.id);
@@ -294,7 +294,7 @@ class _SearchPageState extends State<SearchPage> {
       final posts = <Post>[];
       await Future.wait(
         ids.map((id) async {
-          final post = await ApiService.getPost(id);
+          final post = await ApiService.getPostV2(id);
           if (post != null) posts.add(post);
         }),
       );

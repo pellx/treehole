@@ -143,6 +143,22 @@ class ApiService {
     }
   }
 
+  static Future<Post?> getPostV2(int id) async {
+    if (_useMock) return _mockPost(id);
+    try {
+      final res =
+          await _client.get(Uri.parse('$_baseV2/$id')).timeout(_timeout);
+      if (!_isHttpSuccess(res.statusCode)) {
+        debugPrint('[ApiService] getPostV2($id) status=${res.statusCode}');
+        return null;
+      }
+      return Post.fromJson(jsonDecode(res.body));
+    } catch (e) {
+      debugPrint('[ApiService] getPostV2($id) error: $e');
+      return null;
+    }
+  }
+
   static Future<ThumbnailData?> downloadThumbnail(String fileName) async {
     try {
       final isGif = fileName.toLowerCase().endsWith('.gif');

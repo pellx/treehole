@@ -182,7 +182,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
     final futures = batch.map((id) async {
       final cached = PostStorage.getPost(id);
       if (cached != null) return (post: cached, fresh: false);
-      final post = await ApiService.getPost(id);
+      final post = await ApiService.getPostV2(id);
       if (post != null) await PostStorage.savePost(post);
       return (post: post, fresh: true);
     }).toList();
@@ -216,25 +216,30 @@ mixin SquarePageStateMixin on State<SquarePage> {
         }
       }
     }
+
+    if (_loadedCount < _allIds.length && _scrollController.hasClients) {
+      final remaining = _scrollController.position.maxScrollExtent -
+          _scrollController.position.pixels;
+      if (remaining < 1500) {
+        _loadMore();
+      }
+    }
   }
 
   // ---- 下拉刷新 ----
   Future<void> _refresh() async {
-    final stopwatch = Stopwatch()..start();
     _loading = true;
     final newIds = await _fetchIdList();
 
     if (newIds.isEmpty) {
-      await _ensureMinDuration(stopwatch, 300);
       _loading = false;
       return;
     }
 
     await _removeDeletedPosts(newIds);
     final freshIds = await _fetchAndInsertNewPosts(newIds);
-    _scheduleCommentRefresh(freshIds);
+    await _batchRefreshComments(freshIds);
 
-    await _ensureMinDuration(stopwatch, 800);
     _loading = false;
   }
 
@@ -272,7 +277,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
       addedIds.map((id) async {
         final cached = PostStorage.getPost(id);
         if (cached != null) return (post: cached, fresh: false);
-        final post = await ApiService.getPost(id);
+        final post = await ApiService.getPostV2(id);
         if (post != null) await PostStorage.savePost(post);
         return (post: post, fresh: true);
       }),
@@ -297,28 +302,108 @@ mixin SquarePageStateMixin on State<SquarePage> {
     return freshIds;
   }
 
-  void _scheduleCommentRefresh(Set<int> freshIds) {
+  /// 批量刷新评论：只主动刷新新拉取的帖子（无冗余 API 调用），
+  /// 所有结果合并到一次 setState，避免多次独立重建列表。
+  Future<void> _batchRefreshComments(Set<int> freshIds) async {
     for (final p in _posts) {
       _postsNeedCommentRefresh.add(p.id);
     }
-    final top = _posts.take(7).toList();
-    for (final p in top) {
+
+    final targets =
+        _posts.where((p) => freshIds.contains(p.id)).take(7).toList();
+    for (final p in targets) {
       _postsNeedCommentRefresh.remove(p.id);
     }
-    unawaited(
-      Future.wait(
-        top.map(
-          (p) => _refreshPostComments(p, fetchLatest: !freshIds.contains(p.id)),
-        ),
-      ),
+    if (targets.isEmpty) return;
+
+    final results = await Future.wait(
+      targets.map((p) => _fetchCommentRefreshResult(p)),
     );
+
+    bool changed = false;
+    for (final r in results) {
+      if (r.freshPost != null && _applyPostReplacement(r.freshPost!)) {
+        changed = true;
+      }
+      if (r.comments != null) {
+        _comments[r.postId] = r.comments!;
+        changed = true;
+      }
+    }
+
+    if (changed && mounted) setState(() {});
   }
 
-  Future<void> _ensureMinDuration(Stopwatch stopwatch, int minMs) async {
-    final elapsed = stopwatch.elapsedMilliseconds;
-    if (elapsed < minMs) {
-      await Future.delayed(Duration(milliseconds: minMs - elapsed));
+  /// 拉取单个帖子的评论数据并返回结果，不调用 setState。
+  /// 仅用于批量刷新路径（帖子刚从 API 拉取，comment ID 列表已是最新）。
+  Future<({int postId, List<Comment>? comments, Post? freshPost})>
+      _fetchCommentRefreshResult(Post post) async {
+    final newIds = post.comments;
+    if (newIds.isEmpty) {
+      return (postId: post.id, comments: null, freshPost: null);
     }
+
+    final existingIds = _comments[post.id]?.map((c) => c.id).toSet() ?? {};
+    final missingIds = newIds.where((id) => !existingIds.contains(id)).toList();
+
+    if (missingIds.isEmpty &&
+        _comments[post.id] != null &&
+        _comments[post.id]!.length == newIds.length) {
+      return (postId: post.id, comments: null, freshPost: null);
+    }
+
+    List<Comment> merged;
+    if (missingIds.isEmpty) {
+      merged = PostStorage.getComments(newIds);
+    } else {
+      final futures = missingIds.map((id) async {
+        final cmt = await ApiService.getComment(id);
+        if (cmt != null) await PostStorage.saveComment(cmt);
+        return cmt;
+      });
+      final newCmts =
+          (await Future.wait(futures)).whereType<Comment>().toList();
+      final existing = _comments[post.id] ?? PostStorage.getComments(newIds);
+      merged = <Comment>[...existing];
+      for (final c in newCmts) {
+        if (!merged.any((e) => e.id == c.id)) merged.add(c);
+      }
+    }
+
+    merged.sort(
+      (a, b) => newIds.indexOf(a.id).compareTo(newIds.indexOf(b.id)),
+    );
+    await PostStorage.updatePostCommentIds(post.id, newIds);
+    return (postId: post.id, comments: merged, freshPost: null);
+  }
+
+  /// 用新帖数据替换列表中同 id 项，不调用 setState。返回是否发生了替换。
+  bool _applyPostReplacement(Post fresh) {
+    final idx = _posts.indexWhere((p) => p.id == fresh.id);
+    if (idx < 0) return false;
+    final old = _posts[idx];
+    final same =
+        old.author == fresh.author &&
+        old.isAnonymous == fresh.isAnonymous &&
+        old.updateAt == fresh.updateAt &&
+        old.title == fresh.title &&
+        old.content == fresh.content &&
+        _sameIntList(old.comments, fresh.comments) &&
+        _sameStringList(
+          old.images.map((e) => e.fileName).toList(),
+          fresh.images.map((e) => e.fileName).toList(),
+        ) &&
+        _sameStringList(
+          old.attachments.map((e) => e.fileName).toList(),
+          fresh.attachments.map((e) => e.fileName).toList(),
+        ) &&
+        _sameStringList(
+          old.attachments.map((e) => e.sourceName).toList(),
+          fresh.attachments.map((e) => e.sourceName).toList(),
+        );
+    if (same) return false;
+    _posts[idx] = fresh;
+    return true;
   }
 
   Map<int, int> _buildOrderMap() {
@@ -351,7 +436,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
     List<int> newIds;
     if (fetchLatest) {
       try {
-        final fresh = await ApiService.getPost(post.id);
+        final fresh = await ApiService.getPostV2(post.id);
         if (fresh != null) {
           await PostStorage.savePost(fresh);
           _replaceLoadedPost(fresh);
@@ -431,7 +516,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
   Future<void> _refreshSinglePost(Post post) async {
     Post? fresh;
     try {
-      fresh = await ApiService.getPost(post.id);
+      fresh = await ApiService.getPostV2(post.id);
     } catch (_) {
       fresh = null;
     }

@@ -43,7 +43,11 @@ class Post {
       updateAt: json['update_at'] as String? ?? '',
       images:
           (json['images'] as List<dynamic>?)
-              ?.map((e) => PostImage(fileName: e['file_name'] as String))
+              ?.map((e) => PostImage(
+                    fileName: e['file_name'] as String,
+                    width: (e['width'] as num?)?.toInt() ?? 0,
+                    height: (e['height'] as num?)?.toInt() ?? 0,
+                  ))
               .toList() ??
           [],
       attachments:
@@ -75,7 +79,9 @@ bool _asBool(dynamic v) {
 
 class PostImage {
   final String fileName;
-  const PostImage({required this.fileName});
+  final int width;
+  final int height;
+  const PostImage({required this.fileName, this.width = 0, this.height = 0});
 }
 
 class PostAttachment {
