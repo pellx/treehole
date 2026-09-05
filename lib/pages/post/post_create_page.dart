@@ -304,7 +304,7 @@ class _PostCreatePageState extends State<PostCreatePage>
     HapticFeedback.lightImpact();
     setState(() {
       final removed = _images.removeAt(index);
-      _uploadedImages.removeWhere((r) => r.filename == removed.name);
+      _uploadedImages.removeWhere((r) => r.original == removed.name);
       if (_previewKeys.length == _images.length + 1) {
         _previewKeys.removeAt(index);
       } else {
@@ -509,7 +509,7 @@ class _PostCreatePageState extends State<PostCreatePage>
       final result = UploadResult.fromJson(
         Map<String, dynamic>.from(raw as Map),
       );
-      uploadedByName[result.filename] = result;
+      uploadedByName[result.original] = result;
     }
     for (final img in images) {
       final result = uploadedByName[img.name];
@@ -518,12 +518,12 @@ class _PostCreatePageState extends State<PostCreatePage>
     final attUpRaw = draft['uploaded_attachment'] as Map?;
     if (attUpRaw != null && attachment != null) {
       final result = UploadResult.fromJson(Map<String, dynamic>.from(attUpRaw));
-      if (result.filename == attachment.name) _uploadedAttachment = result;
+      if (result.original == attachment.name) _uploadedAttachment = result;
     }
 
     // 配不上的（如旧版本草稿没存上传结果）→ 进入页面后自动补传
     final orphanImages = images
-        .where((img) => !_uploadedImages.any((r) => r.filename == img.name))
+        .where((img) => !_uploadedImages.any((r) => r.original == img.name))
         .toList();
     final orphanAttachment = attachment != null && _uploadedAttachment == null
         ? attachment
