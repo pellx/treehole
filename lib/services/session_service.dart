@@ -43,6 +43,9 @@ class SessionService {
   Completer<void>? _wsHandling;
   bool _insideWsHandler = false;
 
+  /// 退出登录进行中：阻断 ensureSession 与 WS 推送触发自动重建
+  bool _loggingOut = false;
+
   /// 最近一次 session 校验通过的时间；短期内重复调用跳过网络校验
   DateTime? _lastValidatedAt;
   static const _validationCacheTtl = Duration(minutes: 5);
@@ -65,6 +68,7 @@ class SessionService {
   ///
   /// 返回 true 表示 session 已就绪可用，false 表示无法获取 session。
   Future<bool> ensureSession() async {
+    if (_loggingOut) return false;
     if (!_insideWsHandler && _wsHandling != null) {
       await _wsHandling!.future;
     }
@@ -90,6 +94,7 @@ class SessionService {
 
   /// Socket.IO：他机解绑 / 本机到期解绑
   Future<void> handleBindingUnboundFromWs([BindingUnboundInfo? info]) async {
+    if (_loggingOut) return;
     if (_wsHandling != null) return _wsHandling!.future;
     _wsHandling = Completer<void>();
     _insideWsHandler = true;
@@ -217,6 +222,7 @@ class SessionService {
 
   /// Socket.IO：本机旧 session 被新签发顶掉
   Future<void> handleSessionInvalidatedFromWs() async {
+    if (_loggingOut) return;
     if (_wsHandling != null) return _wsHandling!.future;
     _wsHandling = Completer<void>();
     _insideWsHandler = true;
@@ -232,6 +238,38 @@ class SessionService {
       _insideWsHandler = false;
       _wsHandling!.complete();
       _wsHandling = null;
+    }
+  }
+
+  /// 退出登录当前账户：注销服务端 session 并清空本机登录态。
+  ///
+  /// 先断开 WebSocket，避免服务端 session.invalidated 推送触发自动重建；
+  /// 服务端注销是尽力而为（网络失败时本地照常登出，服务端 session 待自然过期）。
+  /// 清空本机全部账户令牌缓存后停留未登录态，需重新注册或短信验证码登录。
+  Future<void> logout() async {
+    if (_loggingOut) return;
+    _loggingOut = true;
+    try {
+      RealtimeService.instance.disconnect();
+
+      final sessionId = await DeviceCredentialStore.getSessionId();
+      final sessionSecret = await DeviceCredentialStore.getSessionSecret();
+      if (sessionId != null &&
+          sessionSecret != null &&
+          sessionSecret.isNotEmpty) {
+        await ApiService.logoutSession(
+          sessionId: sessionId,
+          sessionSecret: sessionSecret,
+        );
+      }
+
+      invalidate();
+      final token = await DeviceCredentialStore.getUserExternalToken();
+      await _evictCurrentAccount(token);
+      await _markLoggedOutFully();
+      notifyAccountDisplayChanged();
+    } finally {
+      _loggingOut = false;
     }
   }
 

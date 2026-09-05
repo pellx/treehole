@@ -460,6 +460,101 @@ class _UserPageState extends State<UserPage> {
     _prefetchFuture = BindingCache.prefetchAll();
   }
 
+  /// 退出登录：确认后注销服务端 session 并清空本机登录态，跳转注册/登录页
+  Future<void> _confirmAndLogout() async {
+    HapticFeedback.lightImpact();
+    final colors = Theme.of(context).extension<AppColors>()!;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    const message = '退出后本机将清除该账户的登录凭证\n'
+        '再次使用需重新注册或短信验证码登录\n是否退出登录？';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: colors.common.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AccentDimens.dialogRadius),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(AccentDimens.dialogPadding),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: AccentDimens.dialogMessageFontSize,
+                  height: AccentDimens.dialogMessageLineHeight,
+                  color: onSurface,
+                ),
+              ),
+              const SizedBox(height: AccentDimens.dialogActionsTopGap),
+              Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: AccentDimens.dialogActionHeight,
+                      child: TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        style: TextButton.styleFrom(
+                          foregroundColor: onSurface.withValues(
+                              alpha: AccentDimens.dialogCancelTextAlpha),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AccentDimens.dialogActionHPadding),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                                AccentDimens.dialogActionRadius),
+                          ),
+                          textStyle: const TextStyle(
+                              fontSize: AccentDimens.dialogActionFontSize),
+                        ),
+                        child: const Text('取消'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AccentDimens.dialogActionGap),
+                  Expanded(
+                    child: SizedBox(
+                      height: AccentDimens.dialogActionHeight,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: colors.postCreate.submitBg,
+                          foregroundColor: colors.postCreate.submitText,
+                          elevation: 0,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AccentDimens.dialogActionHPadding),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(
+                                AccentDimens.dialogActionRadius),
+                          ),
+                          textStyle: const TextStyle(
+                              fontSize: AccentDimens.dialogActionFontSize),
+                        ),
+                        child: const Text('退出'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    await SessionService.instance.logout();
+    if (!mounted) return;
+    _reloadAccountUi();
+    _prefetchFuture = BindingCache.prefetchAll();
+    await Navigator.of(context).push(bottomUpRoute(const RegisterPage()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).extension<AppColors>()!;
@@ -562,6 +657,16 @@ class _UserPageState extends State<UserPage> {
                               Icons.switch_account_outlined,
                               _openLoginOther,
                             ),
+                            if (PostStorage.isRegistered()) ...[
+                              _navDivider(colors),
+                              _navTile(
+                                colors,
+                                onSurface,
+                                '退出登录',
+                                Icons.logout_outlined,
+                                _confirmAndLogout,
+                              ),
+                            ],
                           ]),
                           const SizedBox(height: 24),
                         ],

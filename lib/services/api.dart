@@ -1180,6 +1180,36 @@ class ApiService {
     }
   }
 
+  /// POST /user/session/logout — 注销当前 session（服务端删除并断开本机实时连接）
+  static Future<bool> logoutSession({
+    required int sessionId,
+    required String sessionSecret,
+  }) async {
+    try {
+      final res = await _client
+          .post(
+            Uri.parse('$_userBase/session/logout'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'session_id': sessionId,
+              'session_secret': sessionSecret,
+            }),
+          )
+          .timeout(_timeout);
+      if (_isHttpSuccess(res.statusCode)) {
+        return true;
+      }
+      lastError = _parseErrorMessage(res.body);
+      debugPrint(
+        '[ApiService] logoutSession status=${res.statusCode} body=${res.body}',
+      );
+      return false;
+    } catch (e) {
+      debugPrint('[ApiService] logoutSession error: $e');
+      return false;
+    }
+  }
+
   /// POST /user/profile — 查询名字与令牌重置时间
   static Future<UserProfileResult?> getUserProfile({
     required int sessionId,
