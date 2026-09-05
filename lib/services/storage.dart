@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/post.dart';
@@ -71,6 +72,18 @@ class PostStorage {
 
   static Future<void> clearAccount() async {
     await _accountBox.clear();
+  }
+
+  // ---- 主题模式 ----
+
+  static ThemeMode getThemeMode() {
+    final raw = _accountBox.get('theme_mode') as String?;
+    return ThemeMode.values.firstWhere((m) => m.name == raw,
+        orElse: () => ThemeMode.system);
+  }
+
+  static Future<void> saveThemeMode(ThemeMode mode) async {
+    await _accountBox.put('theme_mode', mode.name);
   }
 
   // ---- ID 列表 ----

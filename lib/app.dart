@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'pages/main_shell.dart';
 import 'app_navigator.dart';
 import 'services/session_service.dart';
+import 'services/storage.dart';
 import 'theme/app_colors.dart';
 
 final GlobalKey<TreeholeAppState> appKey = GlobalKey<TreeholeAppState>();
@@ -18,6 +19,7 @@ class TreeholeApp extends StatefulWidget {
 
   static void setThemeMode(ThemeMode mode) {
     _themeMode = mode;
+    PostStorage.saveThemeMode(mode);
     appKey.currentState?.refresh();
   }
 
@@ -31,6 +33,7 @@ class TreeholeAppState extends State<TreeholeApp> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _themeMode = PostStorage.getThemeMode();
     WidgetsBinding.instance.addObserver(this);
     _ensureSession();
   }
@@ -55,6 +58,13 @@ class TreeholeAppState extends State<TreeholeApp> with WidgetsBindingObserver {
     await SessionService.instance.ensureSession();
   }
 
+  static const _transitions = PageTransitionsTheme(
+    builders: {
+      TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    },
+  );
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -71,45 +81,35 @@ class TreeholeAppState extends State<TreeholeApp> with WidgetsBindingObserver {
         Locale('zh', 'CN'),
       ],
       theme: ThemeData.light().copyWith(
-        scaffoldBackgroundColor: AppColors.light.common.background,
+        scaffoldBackgroundColor: AppColors.commonLight.background,
         colorScheme: ColorScheme.light(
-          primary: AppColors.light.common.green,
+          primary: AppColors.commonLight.green,
           onPrimary: Colors.white,
-          surface: AppColors.light.common.surface,
-          onSurface: AppColors.light.common.onSurface,
+          surface: AppColors.commonLight.surface,
+          onSurface: AppColors.commonLight.onSurface,
         ),
         textSelectionTheme: TextSelectionThemeData(
-          cursorColor: AppColors.light.common.green,
-          selectionColor: AppColors.light.common.green.withValues(alpha: 0.3),
-          selectionHandleColor: AppColors.light.common.green,
+          cursorColor: AppColors.commonLight.green,
+          selectionColor: AppColors.commonLight.green.withValues(alpha: 0.3),
+          selectionHandleColor: AppColors.commonLight.green,
         ),
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-          },
-        ),
+        pageTransitionsTheme: _transitions,
         extensions: const [AppColors.light],
       ),
       darkTheme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: AppColors.dark.common.background,
+        scaffoldBackgroundColor: AppColors.commonDark.background,
         colorScheme: ColorScheme.dark(
-          primary: AppColors.dark.common.green,
+          primary: AppColors.commonDark.green,
           onPrimary: Colors.black,
-          surface: AppColors.dark.common.surface,
-          onSurface: AppColors.dark.common.onSurface,
+          surface: AppColors.commonDark.surface,
+          onSurface: AppColors.commonDark.onSurface,
         ),
         textSelectionTheme: TextSelectionThemeData(
-          cursorColor: AppColors.dark.common.green,
-          selectionColor: AppColors.dark.common.green.withValues(alpha: 0.3),
-          selectionHandleColor: AppColors.dark.common.green,
+          cursorColor: AppColors.commonDark.green,
+          selectionColor: AppColors.commonDark.green.withValues(alpha: 0.3),
+          selectionHandleColor: AppColors.commonDark.green,
         ),
-        pageTransitionsTheme: const PageTransitionsTheme(
-          builders: {
-            TargetPlatform.android: CupertinoPageTransitionsBuilder(),
-            TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
-          },
-        ),
+        pageTransitionsTheme: _transitions,
         extensions: const [AppColors.dark],
       ),
       builder: (context, child) {
