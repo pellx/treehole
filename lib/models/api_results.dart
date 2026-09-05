@@ -1,10 +1,5 @@
 import '../services/timezone_service.dart';
 
-DateTime? _parseApiDateTime(dynamic raw) {
-  if (raw is! String) return null;
-  return TimezoneService.parseServerDateTime(raw);
-}
-
 /// POST /user/register 返回的凭证
 class RegisterResult {
   final String userToken;
@@ -79,9 +74,9 @@ class LastSwitchResult {
 
   factory LastSwitchResult.fromJson(Map<String, dynamic> json) {
     return LastSwitchResult(
-      switchedAt: _parseApiDateTime(json['switched_at']),
+      switchedAt: TimezoneService.parseServerDateTime(json['switched_at']),
       ownerUserId: (json['owner_user_id'] as num?)?.toInt(),
-      expiresAt: _parseApiDateTime(json['expires_at']),
+      expiresAt: TimezoneService.parseServerDateTime(json['expires_at']),
     );
   }
 }
@@ -109,10 +104,12 @@ class UserProfileResult {
   factory UserProfileResult.fromJson(Map<String, dynamic> json) {
     return UserProfileResult(
       userDisplayId: json['user_display_id'] as String? ?? '',
-      displayIdChangedAt: DateTime.tryParse(
-        json['display_id_changed_at']?.toString() ?? '',
+      displayIdChangedAt: TimezoneService.parseServerDateTime(
+        json['display_id_changed_at'],
       ),
-      tokenResetAt: DateTime.tryParse(json['token_reset_at']?.toString() ?? ''),
+      tokenResetAt: TimezoneService.parseServerDateTime(
+        json['token_reset_at'],
+      ),
     );
   }
 }
@@ -152,10 +149,10 @@ class PrimaryTransferResult {
       primaryDeviceId: (json['primary_device_id'] as num?)?.toInt(),
       primaryDevicePendingId: (json['primary_device_pending_id'] as num?)
           ?.toInt(),
-      primaryTransferRequestedAt: _parseApiDateTime(
+      primaryTransferRequestedAt: TimezoneService.parseServerDateTime(
         json['primary_transfer_requested_at'],
       ),
-      primaryTransferExecuteAt: _parseApiDateTime(
+      primaryTransferExecuteAt: TimezoneService.parseServerDateTime(
         json['primary_transfer_execute_at'],
       ),
     );
@@ -178,7 +175,7 @@ class BindingTransferResult {
     return BindingTransferResult(
       fromDeviceId: (json['from_device_id'] as num).toInt(),
       expiresIn: (json['expires_in'] as num?)?.toInt() ?? 0,
-      expiresAt: _parseApiDateTime(json['expires_at']),
+      expiresAt: TimezoneService.parseServerDateTime(json['expires_at']),
     );
   }
 }
@@ -204,8 +201,8 @@ class BindingUnbindResult {
       bindingId: (json['id'] as num).toInt(),
       deviceId: (json['device_id'] as num).toInt(),
       status: json['status'] as String? ?? 'unbind_pending',
-      unbindRequestedAt: _parseApiDateTime(json['unbind_requested_at']),
-      unbindExecuteAt: _parseApiDateTime(json['unbind_execute_at']),
+      unbindRequestedAt: TimezoneService.parseServerDateTime(json['unbind_requested_at']),
+      unbindExecuteAt: TimezoneService.parseServerDateTime(json['unbind_execute_at']),
     );
   }
 }

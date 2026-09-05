@@ -42,8 +42,7 @@ lib/
 │
 ├── models/                # 数据模型（Post、Comment、SmsResult 等）
 │   ├── api_results.dart   #   API 操作结果 DTO（注册、登录、session 等）
-│   ├── bound_device.dart  #   设备绑定数据
-│   └── bound_account.dart #   账户绑定数据
+│   └── bound_device.dart  #   设备/账户绑定数据
 │
 ├── pages/                 # 页面层，按功能模块划分子目录
 │   ├── main_shell.dart    #   底部导航壳页面
@@ -172,13 +171,10 @@ lib/
 - `PrimaryTransferResult` — 主设备迁移返回
 - `BindingTransferResult` / `BindingUnbindResult` — 跨设备转移 / 解绑返回
 
-### `bound_device.dart` — 设备绑定数据
+### `bound_device.dart` — 绑定数据
 
 - `BoundDeviceInfo` — 单条设备绑定（状态、指纹、主设备标记、解绑时间）
 - `BoundDevicesResult` — 设备列表完整响应（含主设备迁移状态）
-
-### `bound_account.dart` — 账户绑定数据
-
 - `BoundAccountInfo` — 单条账户绑定（令牌、展示名、注册时间；含 `toCacheJson()` 遮罩）
 
 ## services/ 详解
@@ -187,7 +183,7 @@ lib/
 
 ### `api.dart` — HTTP API 客户端
 
-所有后端接口的调用入口，只保留 `ApiService` 方法 + `ThumbnailData` 传输类。DTO 数据类已拆到 `models/api_results.dart`、`models/bound_device.dart`、`models/bound_account.dart`。
+所有后端接口的调用入口，只保留 `ApiService` 方法 + `ThumbnailData` 传输类。DTO 数据类已拆到 `models/api_results.dart`、`models/bound_device.dart`。
 
 **核心设计：**
 - 共享一个 `http.Client` 实例（连接复用）

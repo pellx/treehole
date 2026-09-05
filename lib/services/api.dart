@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/api_results.dart';
-import '../models/bound_account.dart';
 import '../models/bound_device.dart';
 import '../models/comment.dart';
 import '../models/device_fingerprint.dart';

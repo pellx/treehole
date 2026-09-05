@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../models/bound_account.dart';
+import '../../models/bound_device.dart';
 import '../../services/api.dart';
 import '../../services/binding_cache.dart';
 import '../../services/device_credential_store.dart';
