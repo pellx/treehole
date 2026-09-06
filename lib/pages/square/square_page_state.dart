@@ -69,6 +69,8 @@ mixin SquarePageStateMixin on State<SquarePage> {
   }
 
   void _onLeftPullEnd() {
+    // 刷新进行中忽略后续手势，防止并发多个 _refresh 双双 insertAll 造成重复帖
+    if (_leftRefreshing) return;
     if (_leftPullProgress >= 1.0) {
       _triggerLeftRefresh();
     } else if (_leftPullDistance != 0 || _leftPullHapticTriggered) {
@@ -288,14 +290,19 @@ mixin SquarePageStateMixin on State<SquarePage> {
       for (final r in fetched) if (r.fresh && r.post != null) r.post!.id,
     };
 
+    // 拉取期间可能有在途的 _loadMore / 并发刷新已把同 id 帖子加入 _posts，
+    // 插入前必须按当前 _posts 重新去重（同时去重 newPosts 内部重复 id）
+    final currentIds = _posts.map((p) => p.id).toSet();
+    final deduped = [for (final p in newPosts) if (currentIds.add(p.id)) p];
+
     _allIds = newIds;
-    _loadedCount = _posts.length + newPosts.length;
-    if (newPosts.isNotEmpty) {
-      for (final p in newPosts) {
+    _loadedCount = _posts.length + deduped.length;
+    if (deduped.isNotEmpty) {
+      for (final p in deduped) {
         _comments[p.id] ??= PostStorage.getComments(p.comments);
       }
       final order = _buildOrderMap();
-      _posts.insertAll(0, newPosts);
+      _posts.insertAll(0, deduped);
       _posts.sort((a, b) => (order[a.id] ?? 0).compareTo(order[b.id] ?? 0));
       setState(() {});
     }
