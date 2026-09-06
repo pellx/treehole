@@ -339,8 +339,10 @@ mixin SquarePageStateMixin on State<SquarePage> {
   }
 
   Future<Set<int>> _fetchAndInsertNewPosts(List<int> newIds) async {
-    final existingIds = _posts.map((p) => p.id).toSet();
-    final addedIds = newIds.where((id) => !existingIds.contains(id)).toList();
+    // 只有“上次 id 列表里不存在的 id”才是新帖；不能按 _posts 判断——
+    // 未滚动加载到的旧帖并非新帖，否则刷新会对全站帖子逐篇拉取内容
+    final knownIds = _allIds.toSet();
+    final addedIds = newIds.where((id) => !knownIds.contains(id)).toList();
 
     final fetched = await Future.wait(
       addedIds.map((id) async {
