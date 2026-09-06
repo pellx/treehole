@@ -10,6 +10,8 @@ import '../../services/session_service.dart';
 import '../../services/storage.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens_sms.dart';
+import '../settings/settings_navigation.dart';
+import 'register_page.dart';
 import 'sms_register_page.dart';
 
 /// 手机号找回页（官方「手机号登录」样式，系统默认路由推入）。
@@ -97,6 +99,13 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
       return;
     }
     await _confirm();
+  }
+
+  Future<void> _openTokenLogin() async {
+    final ok = await Navigator.of(context).push<bool>(
+      topDownRoute(const RegisterPage(startAtLogin: true)),
+    );
+    if (ok == true && mounted) Navigator.of(context).pop(true);
   }
 
   Future<void> _sendCode() async {
@@ -304,6 +313,26 @@ class _SmsLoginPageState extends State<SmsLoginPage> {
               colors,
               _codeSent ? '验证并找回' : '发送验证码',
               enabled ? _onPrimary : null,
+            ),
+            const SizedBox(height: SmsDimens.tokenLoginTopGap),
+            Center(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _openTokenLogin,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    '切换账户令牌登录',
+                    style: TextStyle(
+                      fontSize: SmsDimens.tokenLoginFontSize,
+                      color: colors.suffixLink,
+                    ),
+                  ),
+                ),
+              ),
             ),
             if (_error != null) ...[
               const SizedBox(height: SmsDimens.errorTopGap),

@@ -144,7 +144,7 @@ class RegisterDimens {
   static const double namingErrorGap = 12;
 
   // ── 登录阶段（login）──
-  static const double loginInputVOffset = 17;
+  static const double loginInputVOffset = 50;
   static const double loginInputHOffset = 0;
   /// 注册流程进入 login 时的令牌输入栏高度
   static const double loginInputHeight = 20;
@@ -179,6 +179,7 @@ class RegisterDimens {
   static const double loginButtonConfirmSize = 20;
   static const double loginButtonStrokeWidth = 2;
   static const double loginErrorGap = 12;
+  static const double loginErrorAreaHeight = 20;
 
   static const double loginRecoverGap = 2; // 输入框和"找回用户"间距（保留）
   static const double loginRecoverFontSize = 12;

@@ -930,9 +930,14 @@ class _PostCreatePageState extends State<PostCreatePage>
     final animMs = AppDimens.postCreateLabelAnimMs;
     final curve = Curves.easeOut;
     return GestureDetector(
-      onTap: () => PostStorage.isRegistered()
-          ? _titleFocus.requestFocus()
-          : Navigator.of(context).push(bottomUpRoute(const RegisterPage())),
+      onTap: () async {
+        if (PostStorage.isRegistered()) {
+          _titleFocus.requestFocus();
+        } else {
+          await Navigator.of(context).push(bottomUpRoute(const RegisterPage()));
+          if (mounted) setState(() {});
+        }
+      },
       child: Container(
         height: AppDimens.postCreateTitleMinHeight,
         padding: EdgeInsets.symmetric(
@@ -1008,9 +1013,14 @@ class _PostCreatePageState extends State<PostCreatePage>
               .toDouble();
 
     return GestureDetector(
-      onTap: () => PostStorage.isRegistered()
-          ? _contentFocus.requestFocus()
-          : Navigator.of(context).push(bottomUpRoute(const RegisterPage())),
+      onTap: () async {
+        if (PostStorage.isRegistered()) {
+          _contentFocus.requestFocus();
+        } else {
+          await Navigator.of(context).push(bottomUpRoute(const RegisterPage()));
+          if (mounted) setState(() {});
+        }
+      },
       child: Container(
         key: key,
         child: LayoutBuilder(

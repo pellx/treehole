@@ -76,5 +76,11 @@
 	<string>应用可能通过系统组件访问位置信息，需填写用途说明</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>mqq</string>
+		<string>mqqwpa</string>
+		<string>mqqapi</string>
+	</array>
 </dict>
 </plist>

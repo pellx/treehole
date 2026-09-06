@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/device_fingerprint.dart';
 import '../../services/api.dart';
@@ -531,12 +533,22 @@ class _RegisterPageState extends State<RegisterPage> {
               _offsetLayer(
                 vOffset: RegisterDimens.deviceRegisteredHintVOffset,
                 hOffset: RegisterDimens.deviceRegisteredHintHOffset,
-                child: Text(
-                  '如需帮助，请联系我们',
-                  style: TextStyle(
-                    fontSize: RegisterDimens.deviceRegisteredHintFontSize,
-                    color: onSurface.withValues(
-                      alpha: RegisterDimens.deviceRegisteredHintAlpha,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _contactQQ,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Text(
+                      '如需帮助，请联系我们',
+                      style: TextStyle(
+                        fontSize: RegisterDimens.deviceRegisteredHintFontSize,
+                        color: onSurface.withValues(
+                          alpha: RegisterDimens.deviceRegisteredHintAlpha,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -694,6 +706,15 @@ class _RegisterPageState extends State<RegisterPage> {
       MaterialPageRoute(builder: (_) => const SmsRegisterPage()),
     );
     if (ok == true && mounted) Navigator.pop(context);
+  }
+
+  Future<void> _contactQQ() async {
+    final uri = Uri.parse(Platform.isIOS
+        ? 'mqq://card/show_pslcard?src_type=internal&version=1&uin=1541578716&card_type=person&source=qrcode'
+        : 'mqqapi://card/show_pslcard?src_type=internal&version=1&uin=1541578716&card_type=person&source=qrcode');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
   }
 
   /// 已注册阶段的两条路径按钮（与注册按钮同款式）
@@ -892,15 +913,20 @@ class _RegisterPageState extends State<RegisterPage> {
             ),
           ],
         ),
-        if (_renameError != null) ...[
-          const SizedBox(height: RegisterDimens.namingErrorGap),
-          Text(_renameError!,
-              style: TextStyle(
-                fontSize: RegisterDimens.stepFontSize,
-                color: colors.register.errorText,
-              ),
-              textAlign: TextAlign.center),
-        ],
+        const SizedBox(height: RegisterDimens.namingErrorGap),
+        SizedBox(
+          height: RegisterDimens.loginErrorAreaHeight,
+          child: _renameError != null
+              ? Text(
+                  _renameError!,
+                  style: TextStyle(
+                    fontSize: RegisterDimens.stepFontSize,
+                    color: colors.register.errorText,
+                  ),
+                  textAlign: TextAlign.center,
+                )
+              : null,
+        ),
       ],
     );
   }
@@ -1069,17 +1095,20 @@ class _RegisterPageState extends State<RegisterPage> {
             ),
           ),
         ],
-        if (_renameError != null) ...[
-          const SizedBox(height: RegisterDimens.namingErrorGap),
-          Text(
-            _renameError!,
-            style: TextStyle(
-              fontSize: RegisterDimens.stepFontSize,
-              color: colors.register.errorText,
-            ),
-            textAlign: TextAlign.center,
-          ),
-        ],
+        const SizedBox(height: RegisterDimens.namingErrorGap),
+        SizedBox(
+          height: RegisterDimens.loginErrorAreaHeight,
+          child: _renameError != null
+              ? Text(
+                  _renameError!,
+                  style: TextStyle(
+                    fontSize: RegisterDimens.stepFontSize,
+                    color: colors.register.errorText,
+                  ),
+                  textAlign: TextAlign.center,
+                )
+              : null,
+        ),
       ],
     );
   }

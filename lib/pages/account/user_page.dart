@@ -560,6 +560,7 @@ class _UserPageState extends State<UserPage> {
     final colors = Theme.of(context).extension<AppColors>()!;
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final isLight = Theme.of(context).brightness == Brightness.light;
+    final isRegistered = PostStorage.isRegistered();
 
     final pageBg = isLight
         ? const Color(0xFFF2F2F2)
@@ -612,13 +613,15 @@ class _UserPageState extends State<UserPage> {
                               ),
                             ),
                           const SizedBox(height: 20),
-                          _sectionTitle('账户安全', onSurface),
-                          _sectionCard(colors, [
-                            _tokenTile(colors, onSurface),
-                            _navDivider(colors),
-                            _resetTokenTile(colors, onSurface),
-                          ]),
-                          const SizedBox(height: 20),
+                          if (isRegistered) ...[
+                            _sectionTitle('账户安全', onSurface),
+                            _sectionCard(colors, [
+                              _tokenTile(colors, onSurface),
+                              _navDivider(colors),
+                              _resetTokenTile(colors, onSurface),
+                            ]),
+                            const SizedBox(height: 20),
+                          ],
                           _sectionTitle('应用', onSurface),
                           _sectionCard(colors, [
                             _navTile(
@@ -640,24 +643,24 @@ class _UserPageState extends State<UserPage> {
                             ],
                           ]),
                           const SizedBox(height: 20),
-                          _sectionTitle('账户管理', onSurface),
-                          _sectionCard(colors, [
-                            _navTile(
-                              colors,
-                              onSurface,
-                              '设备绑定',
-                              Icons.devices_outlined,
-                              _openDeviceBinding,
-                            ),
-                            _navDivider(colors),
-                            _navTile(
-                              colors,
-                              onSurface,
-                              '账户切换',
-                              Icons.switch_account_outlined,
-                              _openLoginOther,
-                            ),
-                            if (PostStorage.isRegistered()) ...[
+                          if (isRegistered) ...[
+                            _sectionTitle('账户管理', onSurface),
+                            _sectionCard(colors, [
+                              _navTile(
+                                colors,
+                                onSurface,
+                                '设备绑定',
+                                Icons.devices_outlined,
+                                _openDeviceBinding,
+                              ),
+                              _navDivider(colors),
+                              _navTile(
+                                colors,
+                                onSurface,
+                                '账户切换',
+                                Icons.switch_account_outlined,
+                                _openLoginOther,
+                              ),
                               _navDivider(colors),
                               _navTile(
                                 colors,
@@ -666,8 +669,8 @@ class _UserPageState extends State<UserPage> {
                                 Icons.logout_outlined,
                                 _confirmAndLogout,
                               ),
-                            ],
-                          ]),
+                            ]),
+                          ],
                           const SizedBox(height: 24),
                         ],
                       ),

@@ -56,4 +56,8 @@ class SmsDimens {
   static const double buttonFontSize = 18;
   static const double buttonSpinnerSize = 20;
   static const double buttonSpinnerStroke = 2;
+
+  // ── 令牌登录链接 ──
+  static const double tokenLoginTopGap = 16;
+  static const double tokenLoginFontSize = 14;
 }
