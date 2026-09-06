@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../../models/comment.dart';
 import '../../models/post.dart';
+import '../../models/post_meta.dart';
 import '../../services/api.dart';
 import '../../services/storage.dart';
 import '../../theme/app_colors.dart';

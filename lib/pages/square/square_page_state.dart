@@ -3,6 +3,10 @@ part of 'square_page.dart';
 mixin SquarePageStateMixin on State<SquarePage> {
   List<Post> _posts = [];
   List<int> _allIds = [];
+
+  /// idListv2 元数据：帖子 id → 服务端 update_at，用于判断本地缓存是否过期
+  Map<int, String> _updateAtById = {};
+
   int _loadedCount = 0;
   bool _loading = false;
   String? _error;
@@ -55,6 +59,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
     setState(() {
       _posts = [];
       _allIds = [];
+      _updateAtById = {};
       _loadedCount = 0;
       _comments.clear();
       _postsNeedCommentRefresh.clear();
@@ -130,10 +135,13 @@ mixin SquarePageStateMixin on State<SquarePage> {
   Future<void> _initLoad() async {
     final category = _currentCategory;
     try {
-      _allIds = await ApiService.getIdList(category: category);
+      final res = await ApiService.getIdListV2(category: category);
+      _allIds = [for (final m in res.items) m.id];
+      _updateAtById = {for (final m in res.items) m.id: m.updateAt};
       if (category == null) await PostStorage.saveIdList(_allIds);
     } catch (_) {
       _allIds = category == null ? PostStorage.getIdList() : [];
+      _updateAtById = {};
     }
 
     if (_allIds.isEmpty) {
@@ -168,6 +176,15 @@ mixin SquarePageStateMixin on State<SquarePage> {
   //   - _initLoad 首次加载
   //   - 列表滚到距底部 300px 时触发
   //
+  /// 本地缓存是否已是最新：无 idListv2 元数据（如离线回退）时视为未知，
+  /// 维持原“逐帖复查”行为；有元数据时缓存 update_at 不旧于服务端才算最新
+  bool _isCacheFresh(Post cached) {
+    final serverUpdateAt = _updateAtById[cached.id];
+    if (serverUpdateAt == null || serverUpdateAt.isEmpty) return false;
+    if (cached.updateAt.isEmpty) return false;
+    return cached.updateAt.compareTo(serverUpdateAt) >= 0;
+  }
+
   Future<void> _loadMore() async {
     if (_loading) return;
     final batch = _allIds
@@ -184,10 +201,17 @@ mixin SquarePageStateMixin on State<SquarePage> {
 
     final futures = batch.map((id) async {
       final cached = PostStorage.getPost(id);
-      if (cached != null) return (post: cached, fresh: false);
+      // 缓存未过期 → 直接使用，不再发任何复查请求
+      if (cached != null && _isCacheFresh(cached)) {
+        return (post: cached, fresh: false, upToDate: true);
+      }
       final post = await ApiService.getPostV2(id);
-      if (post != null) await PostStorage.savePost(post);
-      return (post: post, fresh: true);
+      if (post != null) {
+        await PostStorage.savePost(post);
+        return (post: post, fresh: true, upToDate: false);
+      }
+      // 拉取失败回退缓存（断网时仍可显示），评论走原复查逻辑
+      return (post: cached, fresh: false, upToDate: false);
     }).toList();
 
     final order = _buildOrderMap();
@@ -201,7 +225,9 @@ mixin SquarePageStateMixin on State<SquarePage> {
           _posts.add(post);
           _posts.sort((a, b) => (order[a.id] ?? 0).compareTo(order[b.id] ?? 0));
         });
-        _refreshPostComments(post, fetchLatest: !result.fresh);
+        if (!result.upToDate) {
+          _refreshPostComments(post, fetchLatest: !result.fresh);
+        }
       }
     }
 
@@ -232,28 +258,37 @@ mixin SquarePageStateMixin on State<SquarePage> {
   // ---- 下拉刷新 ----
   Future<void> _refresh() async {
     _loading = true;
-    final newIds = await _fetchIdList();
+    final metas = await _fetchIdListMeta();
 
-    if (newIds.isEmpty) {
+    if (metas.isEmpty) {
       _loading = false;
       return;
     }
 
+    final newIds = [for (final m in metas) m.id];
+    _updateAtById = {for (final m in metas) m.id: m.updateAt};
+
     await _removeDeletedPosts(newIds);
     final freshIds = await _fetchAndInsertNewPosts(newIds);
-    await _batchRefreshComments(freshIds);
+    final staleIds = await _refreshStalePosts();
+    await _batchRefreshComments({...freshIds, ...staleIds});
 
     _loading = false;
   }
 
-  Future<List<int>> _fetchIdList() async {
+  /// 拉取 idListv2 元数据；失败时回退 Hive 缓存的 id 列表（无元数据，
+  /// 后续按“未知”处理，维持原逐帖复查行为）
+  Future<List<PostMeta>> _fetchIdListMeta() async {
     final category = _currentCategory;
     try {
-      final ids = await ApiService.getIdList(category: category);
-      if (category == null) await PostStorage.saveIdList(ids);
-      return ids;
+      final res = await ApiService.getIdListV2(category: category);
+      if (category == null) {
+        await PostStorage.saveIdList([for (final m in res.items) m.id]);
+      }
+      return res.items;
     } catch (_) {
-      return category == null ? PostStorage.getIdList() : [];
+      final ids = category == null ? PostStorage.getIdList() : <int>[];
+      return [for (final id in ids) PostMeta(id: id)];
     }
   }
 
@@ -270,6 +305,37 @@ mixin SquarePageStateMixin on State<SquarePage> {
     }
     setState(() {});
     await Future.wait(removedIds.map(PostStorage.deletePost));
+  }
+
+  /// 用 idListv2 的 update_at 比对已加载帖子，只重新拉取有变更的
+  /// （回复/编辑都会刷新 update_at），替代原来的逐帖复查。
+  /// 返回成功刷新的帖子 id，交由 _batchRefreshComments 同步评论。
+  Future<Set<int>> _refreshStalePosts() async {
+    final stale = _posts.where((p) {
+      final serverUpdateAt = _updateAtById[p.id];
+      if (serverUpdateAt == null || serverUpdateAt.isEmpty) return false;
+      return p.updateAt.isEmpty || p.updateAt.compareTo(serverUpdateAt) < 0;
+    }).toList();
+    if (stale.isEmpty) return {};
+
+    final results = await Future.wait(
+      stale.map((p) async {
+        try {
+          return await ApiService.getPostV2(p.id);
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+    final refreshed = <int>{};
+    var changed = false;
+    for (final fresh in results.whereType<Post>()) {
+      await PostStorage.savePost(fresh);
+      refreshed.add(fresh.id);
+      if (_applyPostReplacement(fresh)) changed = true;
+    }
+    if (changed && mounted) setState(() {});
+    return refreshed;
   }
 
   Future<Set<int>> _fetchAndInsertNewPosts(List<int> newIds) async {
@@ -310,11 +376,12 @@ mixin SquarePageStateMixin on State<SquarePage> {
     return freshIds;
   }
 
-  /// 批量刷新评论：只主动刷新新拉取的帖子（无冗余 API 调用），
+  /// 批量刷新评论：只刷新本轮有变更的帖子（新帖 + update_at 变化的帖），
+  /// 未变更的帖子评论必然没变，无需复查；
   /// 所有结果合并到一次 setState，避免多次独立重建列表。
   Future<void> _batchRefreshComments(Set<int> freshIds) async {
     for (final p in _posts) {
-      _postsNeedCommentRefresh.add(p.id);
+      if (freshIds.contains(p.id)) _postsNeedCommentRefresh.add(p.id);
     }
 
     final targets =
