@@ -13,7 +13,6 @@ import '../../services/storage.dart';
 import '../../services/timezone_service.dart';
 import '../../services/device_credential_store.dart';
 import '../../theme/app_colors.dart';
-import '../../theme/app_dimens.dart';
 import '../../theme/app_dimens_accent.dart';
 import '../settings/settings_navigation.dart';
 import '../settings/settings_page.dart';
@@ -585,15 +584,13 @@ class _UserPageState extends State<UserPage> {
             slivers: [
               SliverFillRemaining(
                 hasScrollBody: false,
+                // 不设垂直 padding，让首尾卡片贴边：内容放得下时 scrollExtent
+                // 与视口等长（min==max），ClampingScrollPhysics 会直接禁用拖动，
+                // 不会再出现拉伸形变
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 24, 16, 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Center(
-                    child: Transform.translate(
-                      offset: Offset(
-                        AppDimens.userSectionsHOffset,
-                        AppDimens.userSectionsVOffset,
-                      ),
-                      child: Column(
+                    child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           _profileCard(colors, onSurface),
@@ -671,13 +668,11 @@ class _UserPageState extends State<UserPage> {
                               ),
                             ]),
                           ],
-                          const SizedBox(height: 24),
                         ],
                       ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
