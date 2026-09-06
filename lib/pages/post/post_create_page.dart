@@ -259,12 +259,16 @@ class _PostCreatePageState extends State<PostCreatePage>
     });
 
     // 上传不带 session / user_id（后端 DTO 禁止）；归属在发帖 v2 时由 session 落库
-    // 并行上传
+    // 并行上传。targets 与 futures 一一对应，用于完成回调中判断该文件
+    // 是否仍被保留（上传期间用户可能已点叉删除，避免删除的结果“复活”）
+    final targets = <_PickedFile>[];
     final futures = <Future<UploadResult?>>[];
     for (final img in pickedImages) {
+      targets.add(img);
       futures.add(ApiService.uploadFile(PostUploadType.image, File(img.path)));
     }
     if (pickedAttachment != null) {
+      targets.add(pickedAttachment);
       futures.add(
         ApiService.uploadFile(
           PostUploadType.attachment,
@@ -286,12 +290,17 @@ class _PostCreatePageState extends State<PostCreatePage>
       return;
     }
 
-    final all = results.whereType<UploadResult>();
     setState(() {
-      for (final r in all) {
+      for (var i = 0; i < results.length; i++) {
+        final r = results[i];
+        if (r == null) continue;
+        final target = targets[i];
         if (r.type == PostUploadType.image) {
-          _uploadedImages.add(r);
-        } else {
+          // 上传期间已被用户删除的图片不再登记（identity 比较，同名图不误删）
+          if (_images.any((e) => identical(e, target))) {
+            _uploadedImages.add(r);
+          }
+        } else if (identical(_attachment, target)) {
           _uploadedAttachment = r;
         }
       }
@@ -545,6 +554,9 @@ class _PostCreatePageState extends State<PostCreatePage>
       _uploading = true;
       _errorMessage = null;
     });
+    // targets 与 futures 一一对应；补传期间用户也可能删除文件，完成时按
+    // identity 校验该文件是否仍被保留，避免已删除的上传结果“复活”
+    final targets = <_PickedFile>[...images, if (attachment != null) attachment];
     final futures = <Future<UploadResult?>>[
       for (final img in images)
         ApiService.uploadFile(PostUploadType.image, File(img.path)),
@@ -564,10 +576,15 @@ class _PostCreatePageState extends State<PostCreatePage>
     }
     setState(() {
       _uploading = false;
-      for (final r in results.whereType<UploadResult>()) {
+      for (var i = 0; i < results.length; i++) {
+        final r = results[i];
+        if (r == null) continue;
+        final target = targets[i];
         if (r.type == PostUploadType.image) {
-          _uploadedImages.add(r);
-        } else {
+          if (_images.any((e) => identical(e, target))) {
+            _uploadedImages.add(r);
+          }
+        } else if (identical(_attachment, target)) {
           _uploadedAttachment = r;
         }
       }
