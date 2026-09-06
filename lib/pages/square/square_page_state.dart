@@ -86,6 +86,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
       _leftPullHapticTriggered = false;
     });
     await _refresh();
+    await Future.delayed(const Duration(milliseconds: 100));
     if (mounted) {
       setState(() {
         _leftRefreshing = false;
