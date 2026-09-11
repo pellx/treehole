@@ -70,6 +70,30 @@ class PostStorage {
     await _accountBox.put('registered', value);
   }
 
+  /// 注册激活未完成标记：registerV2 已成功（用户已创建、凭证已落盘），
+  /// 但 binding/create → session/create 尚未完成。置位期间应用重启或
+  /// 重进注册页应自动恢复激活流程，而不是重新注册。
+  static bool isActivationPending() {
+    return _accountBox.get('activation_pending', defaultValue: false) as bool;
+  }
+
+  static Future<void> setActivationPending(bool value) async {
+    await _accountBox.put('activation_pending', value);
+  }
+
+  /// 当前注册尝试的幂等 ID：registerV2 响应丢失时凭此向服务端查询结果
+  static String? getRegistrationRequestId() {
+    return _accountBox.get('registration_request_id') as String?;
+  }
+
+  static Future<void> saveRegistrationRequestId(String id) async {
+    await _accountBox.put('registration_request_id', id);
+  }
+
+  static Future<void> clearRegistrationRequestId() async {
+    await _accountBox.delete('registration_request_id');
+  }
+
   static Future<void> clearAccount() async {
     await _accountBox.clear();
   }

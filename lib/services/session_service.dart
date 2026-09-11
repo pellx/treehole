@@ -46,6 +46,9 @@ class SessionService {
   /// 退出登录进行中：阻断 ensureSession 与 WS 推送触发自动重建
   bool _loggingOut = false;
 
+  /// 正在进行的注册激活恢复，避免注册页与启动恢复并发重入
+  Completer<bool>? _pendingActivation;
+
   /// 最近一次 session 校验通过的时间；短期内重复调用跳过网络校验
   DateTime? _lastValidatedAt;
   static const _validationCacheTtl = Duration(minutes: 5);
@@ -284,6 +287,12 @@ class SessionService {
   }
 
   Future<bool> _ensureSessionInternal() async {
+    // 未完成的注册激活优先恢复：registerV2 已建号但建绑/会话中断时，
+    // 本机没有任何绑定，走下方 failover 会把待激活账户误判为已解绑清掉
+    if (PostStorage.isActivationPending()) {
+      return resumePendingActivation();
+    }
+
     final sessionId = await DeviceCredentialStore.getSessionId();
     final sessionSecret = await DeviceCredentialStore.getSessionSecret();
 
@@ -331,18 +340,21 @@ class SessionService {
           deviceSecret: deviceSecret,
         );
         if (ok) return true;
+        final err = ApiService.lastError;
+        // 网络错误不代表 token/secret 失效：不切号、不轮换，下次再试
+        if (ApiService.isNetworkError(err)) return false;
         // 正式解绑：不再 login 复活当前账户，直接切其他已保存用户
-        if (ApiService.lastError == 'DEVICE_NOT_BOUND') {
+        if (err == 'DEVICE_NOT_BOUND') {
           return _failoverAfterUnbound(
             failedToken: userToken,
             extraCandidates: const [],
           );
         }
         // secret 失效：login 轮换 secret
-        if (ApiService.lastError == 'DEVICE_SECRET_INVALID') {
+        if (err == 'DEVICE_SECRET_INVALID') {
           final loginOk = await loginWithToken(userToken);
           if (loginOk) return true;
-        } else if (ApiService.lastError == 'DEVICE_SESSION_LOCKED') {
+        } else if (err == 'DEVICE_SESSION_LOCKED') {
           return false;
         } else {
           return false;
@@ -427,8 +439,10 @@ class SessionService {
     for (final token in tokens) {
       final ok = await loginWithToken(token);
       if (ok) return true;
-      if (ApiService.lastError == 'DEVICE_NOT_BOUND' ||
-          ApiService.lastError == 'USER_NOT_FOUND') {
+      final err = ApiService.lastError;
+      // 网络错误时保留候选令牌：不代表账户已失效
+      if (ApiService.isNetworkError(err)) continue;
+      if (err == 'DEVICE_NOT_BOUND' || err == 'USER_NOT_FOUND') {
         await DeviceCredentialStore.removeKnownUserToken(token);
       }
     }
@@ -479,17 +493,19 @@ class SessionService {
       deviceSecret: secret,
     );
     if (bound == null) {
-      if (ApiService.lastError == 'DEVICE_SESSION_LOCKED') return false;
+      final err = ApiService.lastError;
+      if (ApiService.isNetworkError(err)) return false;
+      if (err == 'DEVICE_SESSION_LOCKED') return false;
       // secret 无效等 → login 轮换
-      if (ApiService.lastError == 'DEVICE_SECRET_INVALID' ||
-          ApiService.lastError == 'DEVICE_NOT_FOUND' ||
-          ApiService.lastError == 'FINGERPRINT_MISMATCH') {
+      if (err == 'DEVICE_SECRET_INVALID' ||
+          err == 'DEVICE_NOT_FOUND' ||
+          err == 'FINGERPRINT_MISMATCH') {
         return loginWithToken(userToken);
       }
       // 其他建绑错误（含 transfer）直接失败，避免误轮换
-      if (ApiService.lastError == 'TRANSFER_REQUIRED' ||
-          ApiService.lastError == 'TRANSFER_INVALID' ||
-          ApiService.lastError == 'REBIND_COOLDOWN') {
+      if (err == 'TRANSFER_REQUIRED' ||
+          err == 'TRANSFER_INVALID' ||
+          err == 'REBIND_COOLDOWN') {
         return false;
       }
       return loginWithToken(userToken);
@@ -580,9 +596,68 @@ class SessionService {
     return loginOk;
   }
 
-  /// 注册后：用现有 secret 建绑再申请 session
+  /// 注册后激活：先尝试直接建 session，仅在确认未绑定后才建绑。
+  ///
+  /// 幂等：重复调用不会重复建号/建绑——
+  ///   - sms/register 已一步建绑；普通注册重试时绑定也可能已建好
+  ///     （上次在 session/create 才失败），直接补建 session 即可；
+  ///   - 全新注册（无任何绑定）session/create 返回 DEVICE_NOT_BOUND，
+  ///     再走 binding/create → session/create。
+  /// 网络错误返回 false 且不轮换 secret、不切号，交由调用方重试。
   Future<bool> activateAfterRegister(String userToken) async {
-    return _bindWithExistingSecret(userToken.trim());
+    final token = userToken.trim();
+    if (token.isEmpty) {
+      ApiService.lastError = 'TOKEN_EMPTY';
+      return false;
+    }
+    final secret = await DeviceCredentialStore.getDeviceSecret();
+    if (secret == null) return loginWithToken(token);
+
+    final ok = await _tryCreateSession(userToken: token, deviceSecret: secret);
+    if (ok) return true;
+
+    final err = ApiService.lastError;
+    if (ApiService.isNetworkError(err)) return false;
+    if (err == 'DEVICE_NOT_BOUND' || err == 'DEVICE_NOT_FOUND') {
+      return _bindWithExistingSecret(token);
+    }
+    if (err == 'DEVICE_SECRET_INVALID' || err == 'FINGERPRINT_MISMATCH') {
+      return loginWithToken(token);
+    }
+    // DEVICE_SESSION_LOCKED / RATE_LIMITED 等：不降级，保留现状供重试
+    return false;
+  }
+
+  /// 恢复未完成的注册激活（应用重启 / 注册页重进时调用）。
+  ///
+  /// registerV2 成功后、session 建立前中断会置 activationPending；
+  /// 此处仅凭本地已保存的 token + device secret 补建绑定/会话，
+  /// 绝不重新调用注册接口。成功后置 registered=true 并清除 pending。
+  Future<bool> resumePendingActivation() async {
+    if (!PostStorage.isActivationPending()) return false;
+    if (_pendingActivation != null) return _pendingActivation!.future;
+    _pendingActivation = Completer<bool>();
+    try {
+      final token = await DeviceCredentialStore.getUserExternalToken();
+      if (token == null || token.trim().isEmpty) {
+        // 凭证已丢失（如调试清数据）：无法恢复，清除 pending 避免死循环
+        await PostStorage.setActivationPending(false);
+        await PostStorage.clearRegistrationRequestId();
+        _pendingActivation!.complete(false);
+        return false;
+      }
+      final ok = await activateAfterRegister(token);
+      if (ok) {
+        await PostStorage.setActivationPending(false);
+        await PostStorage.clearRegistrationRequestId();
+        await PostStorage.setRegistered(true);
+        notifyAccountDisplayChanged();
+      }
+      _pendingActivation!.complete(ok);
+      return ok;
+    } finally {
+      _pendingActivation = null;
+    }
   }
 
   /// 切换成功后：清头像 → 立刻写入提示昵称 → 拉 profile 校正显示名
@@ -636,6 +711,8 @@ class SessionService {
   Future<void> _markLoggedOutFully() async {
     RealtimeService.instance.disconnect();
     await PostStorage.setRegistered(false);
+    await PostStorage.setActivationPending(false);
+    await PostStorage.clearRegistrationRequestId();
     await DeviceCredentialStore.saveKnownUserTokens([]);
     await DeviceCredentialStore.clearAccountSessions();
     await DeviceCredentialStore.clearAccountSessionMeta();

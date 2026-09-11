@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -41,6 +43,10 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
   int _cooldown = 0;
   String? _error;
 
+  /// sms/register 已成功但激活（建 session）失败：保留已落盘的 token，
+  /// 主按钮变为「重试建立会话」，绝不重新调用 sms/register 重复建号
+  String? _pendingActivationToken;
+
   /// 发送时服务端判定的模式：login | register
   String? _mode;
 
@@ -79,8 +85,13 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     if (mounted) setState(() {});
   }
 
-  /// 主按钮：未发送时发送验证码，已发送后按模式提交
+  /// 主按钮：未发送时发送验证码，已发送后按模式提交；
+  /// 存在待激活注册时只重试激活
   Future<void> _onPrimary() async {
+    if (_pendingActivationToken != null) {
+      await _retryActivation();
+      return;
+    }
     if (!_codeSent) {
       await _sendCode();
       if (_codeSent && mounted) {
@@ -192,24 +203,58 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
       return;
     }
 
-    // 与 RegisterPage 注册成功后的落盘一致
+    // 与 RegisterPage 注册成功后的落盘一致；关键顺序：先记录
+    // 「待激活」，session 建立成功后才置 registered=true
     await DeviceCredentialStore.saveUserExternalToken(result.userToken);
     await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
     await DeviceCredentialStore.saveDeviceSecret(result.deviceSecret);
+    await DeviceCredentialStore.saveRegisteredFingerprint(
+      jsonEncode(fp.toJson()),
+    );
     await PostStorage.saveDisplayName(name);
-    await PostStorage.setRegistered(true);
+    await PostStorage.setActivationPending(true);
 
     // sms/register 已建绑：用现有 secret 建 session
     final activated =
         await SessionService.instance.activateAfterRegister(result.userToken);
     if (!activated && mounted) {
-      setState(() =>
-          _error = '注册成功，但建绑/会话失败：${ApiService.lastError ?? '未知错误'}');
+      // 不置 registered、不重复注册：主按钮变为「重试建立会话」
+      _pendingActivationToken = result.userToken;
+      setState(() => _error =
+          '注册成功，但建立会话失败：${ApiService.lastError ?? '未知错误'}');
       return;
     }
+    await PostStorage.setActivationPending(false);
+    await PostStorage.setRegistered(true);
     if (!mounted) return;
 
     Navigator.of(context).pop(true);
+  }
+
+  /// 激活失败后的重试：只补建会话，不重新调用 sms/register
+  Future<void> _retryActivation() async {
+    final token = _pendingActivationToken;
+    if (token == null || _submitting) return;
+    setState(() {
+      _submitting = true;
+      _error = null;
+    });
+    try {
+      final ok = await SessionService.instance.activateAfterRegister(token);
+      if (!mounted) return;
+      if (!ok) {
+        setState(() => _error =
+            '建立会话失败：${ApiService.lastError ?? '未知错误'}');
+        return;
+      }
+      await PostStorage.setActivationPending(false);
+      await PostStorage.setRegistered(true);
+      _pendingActivationToken = null;
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
   }
 
   /// login 模式：短信登录。指纹 hash 复用发送时采集的值（同机同会话，
@@ -321,12 +366,14 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
     final code = _codeController.text.trim();
     final name = _nameController.text.trim();
     final canSend = _isValidPhone(phone) && !_sending && _cooldown == 0;
-    final enabled = _codeSent
-        ? _isValidPhone(phone) &&
-            code.isNotEmpty &&
-            (!(_mode == 'register') || name.isNotEmpty) &&
-            !_submitting
-        : canSend;
+    final enabled = _pendingActivationToken != null
+        ? !_submitting
+        : _codeSent
+            ? _isValidPhone(phone) &&
+                code.isNotEmpty &&
+                (!(_mode == 'register') || name.isNotEmpty) &&
+                !_submitting
+            : canSend;
 
     return Scaffold(
       backgroundColor: colors.pageBg,
@@ -392,9 +439,11 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
             const SizedBox(height: SmsDimens.buttonTopGap),
             _buildPrimaryButton(
               colors,
-              _codeSent
-                  ? (_mode == 'register' ? '验证并注册' : '验证并登录')
-                  : '发送验证码',
+              _pendingActivationToken != null
+                  ? '重试建立会话'
+                  : _codeSent
+                      ? (_mode == 'register' ? '验证并注册' : '验证并登录')
+                      : '发送验证码',
               enabled ? _onPrimary : null,
             ),
             if (_error != null) ...[

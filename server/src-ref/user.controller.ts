@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { CheckLoginDto } from './dto/check.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -64,6 +64,14 @@ export class UserController {
     return this.userLoginService.registerV2(dto);
   }
 
+  /** 按注册请求 ID 查询已完成的注册结果（响应丢失恢复） */
+  @Get('registerV2/result')
+  async registrationResult(
+    @Query('registration_request_id') requestId: string,
+  ) {
+    return this.userLoginService.getRegistrationResult(requestId ?? '');
+  }
+
   // ── 手机号验证码 ──
 
   /** 发送短信验证码 */
@@ -73,11 +81,11 @@ export class UserController {
     return this.userLoginService.sendSmsCode(dto, req.ip);
   }
 
-  /** 手机号验证码注册（新账号）：一步建号 + 建绑 */
+  /** 手机号验证码注册（新账号）：一步建号 + 建绑 + 主设备设定 */
   @Post('sms/register')
   @HttpCode(HttpStatus.CREATED)
-  async smsRegister(@Body() dto: SmsRegisterDto, @Req() req: Request) {
-    return this.userLoginService.smsRegister(dto, req.ip);
+  async smsRegister(@Body() dto: SmsRegisterDto) {
+    return this.userLoginService.smsRegister(dto);
   }
 
   /** 手机号验证码登录（已存在账号）：直接签发 session */

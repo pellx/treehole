@@ -33,6 +33,8 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
   - [2. POST /user/check](#2-post-usercheck)
   - [3. POST /user/register](#3-post-userregister)
   - [3b. POST /user/registerV2](#3b-post-userregisterv2)
+  - [3c. POST /user/captcha/verify](#3c-post-usercaptchaverify)
+  - [3d. GET /user/registerV2/result](#3d-get-userregisterv2result)
   - [4. POST /user/login](#4-post-userlogin)
   - [4b. POST /user/sms/send](#4b-post-usersmssend)
   - [4c. POST /user/sms/register](#4c-post-usersmsregister)
@@ -205,6 +207,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 {
   "user_display_id": "昵称（1-100字符）",
   "device_finger_print": { "platform": "android", "android": {...} },
+  "registration_request_id": "客户端生成的 uuid（可选，幂等键，推荐）",
   "verification_captcha_ticket": "captcha/verify 签发的凭证（推荐，与 verification_captcha 二选一）",
   "verification_captcha": "阿里云验证码 captchaVerifyParam（客户端原样透传；无凭证时的兼容方式）",
   "verification_pow": {
@@ -236,8 +239,15 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 400 | `验证码服务异常，请重试` |
 | 400 | `验证码服务未配置`（服务端缺 `CAPTCHA_SCENE_ID` / AK） |
 | 400 | `PoW 验证失败` |
+| 409 | `注册请求处理中，请稍后查询结果`（同一 `registration_request_id` 并发重复提交） |
 
 与 v1 的差异：`captchaVerifyParam` 为**一次性**（复用/过期返回 F008、约 20 分钟过期）。
+
+**幂等（registration_request_id）**：客户端每次注册尝试生成一个 uuid，同一尝试的重试（改名重试除外——`NAME_TAKEN` 属正常业务失败，换名后可沿用同一 ID）必须复用同一 ID。服务端以 Redis 键 `register:req:<id>` 保证：
+
+- 同一 ID 只创建一个用户；并发重复提交返回 409；
+- 注册成功后结果缓存 24 小时。客户端请求超时/断连但服务端已建号时，重试同一 ID 直接返回原结果（**跳过 captcha/PoW 校验**，ticket/PoW 已消耗也能恢复）；
+- 也可主动调 [3d. GET /user/registerV2/result](#3d-get-userregisterv2result) 查询结果。
 
 **推荐流程（凭证模式）**：客户端在「通过测试」页完成验证后立即调 [3c. POST /user/captcha/verify](#3c-post-usercaptchaverify) 即时校验，拿 `captcha_ticket` 凭证再提交本接口。凭证 10 分钟有效，**注册失败可复用**（如改名重试），**仅注册成功后销毁**；过期返回 `验证码已使用或过期，请重新验证`，客户端须重新完成验证。直传 `verification_captcha` 为旧客户端兼容路径，失败后须重新取 token。
 
@@ -275,6 +285,22 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 
 ---
 
+### 3d. GET /user/registerV2/result
+
+按注册请求 ID 查询已完成的注册结果（响应丢失恢复）。
+
+**请求**：`GET /user/registerV2/result?registration_request_id=<uuid>`
+
+**响应** `200`
+
+```json
+{
+  "user_token": "16位hex",
+  "device_secret": "64位hex"
+}
+```
+
+**错误** `404`：`REGISTRATION_RESULT_NOT_FOUND`（不存在或仍在处理中——客户端应视原请求为失败，按原错误提示重试）。
 
 ---
 

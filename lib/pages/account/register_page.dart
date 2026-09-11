@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../models/device_fingerprint.dart';
 import '../../services/api.dart';
@@ -30,8 +32,13 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  String _phase = 'checking'; // checking | registered | failed | unregistered | registering | naming | login | done
+  // checking | registered | failed | unregistered | registering | naming
+  // | activating | activationPending | login | done
+  String _phase = 'checking';
   String? _error;
+
+  /// 检测请求序号：_reset/重复刷新后，旧请求不得再覆盖新请求的状态
+  int _checkSeq = 0;
 
   DeviceFingerprint? _fingerprint;
 
@@ -41,6 +48,13 @@ class _RegisterPageState extends State<RegisterPage> {
   bool _loginTokenFocused = false;
   bool _submitting = false;
   String? _renameError;
+
+  /// 激活失败原因（activationPending 阶段展示）
+  String? _activationError;
+
+  /// 注册请求幂等 ID：同一次注册尝试的重试复用同一 ID，
+  /// 服务端凭此保证只创建一个用户；响应丢失时可凭 ID 查询结果
+  String? _registrationRequestId;
 
   // 预取 PoW（页面加载时后台开始，纯后台进行，不在界面展示）
   int? _prePowNonce;
@@ -66,6 +80,10 @@ class _RegisterPageState extends State<RegisterPage> {
     });
     if (widget.startAtLogin) {
       _phase = 'login';
+    } else if (PostStorage.isActivationPending()) {
+      // 上次注册已建号但激活中断：直接恢复激活，不重新检测/注册
+      _phase = 'activating';
+      _resumeActivation();
     } else {
       _check();
       _preFetchPow();
@@ -97,6 +115,7 @@ class _RegisterPageState extends State<RegisterPage> {
     switch (_phase) {
       case 'checking':
       case 'registering':
+      case 'activating':
         return (
           path: 'assets/mu/mu-think.png',
           width: RegisterDimens.thinkWidth,
@@ -114,6 +133,7 @@ class _RegisterPageState extends State<RegisterPage> {
         );
       case 'registered':
       case 'failed':
+      case 'activationPending':
         return (
           path: 'assets/mu/mu-flase.png',
           width: RegisterDimens.flaseWidth,
@@ -162,6 +182,10 @@ class _RegisterPageState extends State<RegisterPage> {
         return '通过一些测试';
       case 'naming':
         return '注册成功！取个名字吧';
+      case 'activating':
+        return '正在建立会话';
+      case 'activationPending':
+        return '注册成功，激活未完成';
       case 'login':
         return '请粘贴用户令牌';
       default:
@@ -170,30 +194,49 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> _check() async {
+    // 序号守卫：_reset/连续刷新后，旧请求的回包不得覆盖新请求的状态
+    final seq = ++_checkSeq;
+    bool stale() => !mounted || seq != _checkSeq;
+
     setState(() { _phase = 'checking'; _error = null; });
     final stopwatch = Stopwatch()..start();
+
+    // 1) 采集设备指纹（本地失败与网络/服务端失败分开提示）
+    DeviceFingerprint fp;
     try {
-      final fp = await DeviceFingerprintService.collect();
-      if (!mounted) return;
-      _fingerprint = fp;
-      final registered = await ApiService.check(deviceFingerPrint: fp);
-      if (!mounted) return;
-
-      // 至少显示 1300ms 的检测中状态
-      final elapsed = stopwatch.elapsedMilliseconds;
-      if (elapsed < 1300) {
-        await Future.delayed(Duration(milliseconds: 1300 - elapsed));
-        if (!mounted) return;
-      }
-
-      if (registered == null) {
-        setState(() => _phase = 'failed');
-        return;
-      }
-      setState(() => _phase = registered ? 'registered' : 'unregistered');
+      fp = await DeviceFingerprintService.collect();
     } catch (e) {
-      if (mounted) setState(() => _phase = 'failed');
+      if (stale()) return;
+      setState(() {
+        _phase = 'failed';
+        _error = '设备指纹采集失败，请重试';
+      });
+      return;
     }
+    if (stale()) return;
+    _fingerprint = fp;
+
+    // 2) 请求服务端检测
+    final registered = await ApiService.check(deviceFingerPrint: fp);
+    if (stale()) return;
+
+    // 至少显示 1300ms 的检测中状态
+    final elapsed = stopwatch.elapsedMilliseconds;
+    if (elapsed < 1300) {
+      await Future.delayed(Duration(milliseconds: 1300 - elapsed));
+      if (stale()) return;
+    }
+
+    if (registered == null) {
+      setState(() {
+        _phase = 'failed';
+        // check() 已写入当前失败原因：网络连接失败 / 服务器响应超时 /
+        // 响应缺少字段 / 服务端错误消息
+        _error = ApiService.lastError ?? '检测失败，请重试';
+      });
+      return;
+    }
+    setState(() => _phase = registered ? 'registered' : 'unregistered');
   }
 
   /// 后台预取 PoW（纯后台，不在界面展示），缩短提交时的等待
@@ -224,6 +267,10 @@ class _RegisterPageState extends State<RegisterPage> {
 
   /// 重置页面状态，重新检测
   void _reset() {
+    // 使旧检测请求立即失效（序号守卫），并丢弃旧的注册幂等 ID
+    _checkSeq++;
+    _registrationRequestId = null;
+    PostStorage.clearRegistrationRequestId();
     _nameController.clear();
     _tokenController.clear();
     _prePowNonce = null;
@@ -234,6 +281,7 @@ class _RegisterPageState extends State<RegisterPage> {
       _error = null;
       _submitting = false;
       _renameError = null;
+      _activationError = null;
     });
     _check();
     _preFetchPow();
@@ -296,7 +344,13 @@ class _RegisterPageState extends State<RegisterPage> {
         return;
       }
 
-      final result = await ApiService.registerV2(
+      // 注册幂等 ID：同一次尝试的重试复用同一 ID；持久化以便
+      // 应用重启后仍能凭 ID 向服务端查询响应丢失的注册结果
+      final requestId =
+          _registrationRequestId ??= const Uuid().v4();
+      await PostStorage.saveRegistrationRequestId(requestId);
+
+      var result = await ApiService.registerV2(
         userDisplayId: name,
         deviceFingerPrint: fp,
         captchaTicket: captchaTicket,
@@ -304,9 +358,17 @@ class _RegisterPageState extends State<RegisterPage> {
           challengeId: _prePowChallenge!.challengeId,
           nonce: _prePowNonce!,
         ),
+        registrationRequestId: requestId,
       );
 
       if (!mounted) return;
+
+      // 响应丢失恢复：超时/断连时服务端可能已建号，凭请求 ID 取回结果，
+      // 避免用户重试产生第二个账号（CAPTCHA ticket / PoW 已消耗也能恢复）
+      if (result == null && ApiService.isNetworkError(ApiService.lastError)) {
+        result = await ApiService.fetchRegistrationResult(requestId);
+        if (!mounted) return;
+      }
 
       if (result == null) {
         final err = ApiService.lastError ?? '';
@@ -327,26 +389,64 @@ class _RegisterPageState extends State<RegisterPage> {
       await DeviceCredentialStore.saveUserExternalToken(result.userToken);
       await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
       await DeviceCredentialStore.saveDeviceSecret(result.deviceSecret);
+      await DeviceCredentialStore.saveRegisteredFingerprint(
+        jsonEncode(fp.toJson()),
+      );
       await PostStorage.saveDisplayName(name);
-      await PostStorage.setRegistered(true);
-
-      // 注册未写 binding：建绑后再申请 session
-      final activated =
-          await SessionService.instance.activateAfterRegister(result.userToken);
-      if (!activated) {
-        setState(() => _renameError =
-            '注册成功，但建绑/会话失败：${ApiService.lastError ?? '未知错误'}');
-        return;
-      }
-
-      setState(() => _phase = 'done');
-      if (!mounted) return;
-      Navigator.pop(context);
+      // 关键顺序：先记录「待激活」，再建绑/会话；只有 session 建立成功
+      // 才置 registered=true。中断后重启应用会自动恢复激活流程。
+      await PostStorage.setActivationPending(true);
+      setState(() => _phase = 'activating');
+      await _activatePending(result.userToken);
     } catch (e) {
       if (mounted) setState(() => _renameError = '网络异常：$e');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
+  }
+
+  /// 建绑 → 建会话；成功才置 registered=true，失败进入 activationPending
+  /// （不重试 registerV2，不重复建号；token/secret 已落盘保留）
+  Future<void> _activatePending(String userToken) async {
+    final activated =
+        await SessionService.instance.activateAfterRegister(userToken);
+    if (!mounted) return;
+    if (!activated) {
+      setState(() {
+        _phase = 'activationPending';
+        _activationError = ApiService.lastError ?? '未知错误';
+      });
+      return;
+    }
+    await PostStorage.setActivationPending(false);
+    await PostStorage.setRegistered(true);
+    await PostStorage.clearRegistrationRequestId();
+    _registrationRequestId = null;
+    if (!mounted) return;
+    setState(() => _phase = 'done');
+    Navigator.pop(context);
+  }
+
+  /// activationPending 阶段的「重试建立会话」/ 重启后自动恢复入口：
+  /// 只调用 activateAfterRegister，绝不重新调用 registerV2
+  Future<void> _resumeActivation() async {
+    if (!mounted) return;
+    setState(() {
+      _phase = 'activating';
+      _activationError = null;
+    });
+    final ok = await SessionService.instance.resumePendingActivation();
+    if (!mounted) return;
+    if (ok) {
+      _registrationRequestId = null;
+      setState(() => _phase = 'done');
+      Navigator.pop(context);
+      return;
+    }
+    setState(() {
+      _phase = 'activationPending';
+      _activationError = ApiService.lastError ?? '网络连接失败';
+    });
   }
 
   Future<void> _confirmLogin() async {
@@ -646,9 +746,7 @@ class _RegisterPageState extends State<RegisterPage> {
                 hOffset: RegisterDimens.loginRecoverHOffset,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    // TODO: 找回用户逻辑
-                  },
+                  onTap: _openSmsLogin,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: RegisterDimens.loginRecoverHitPaddingH,
@@ -664,8 +762,11 @@ class _RegisterPageState extends State<RegisterPage> {
                   ),
                 ),
               ),
-            // 右上角重新加载（相对右上角偏移）
-            if (!widget.startAtLogin)
+            // 右上角重新加载（相对右上角偏移）；激活阶段隐藏，
+            // 防止 _reset 丢弃待激活状态导致重复注册
+            if (!widget.startAtLogin &&
+                _phase != 'activating' &&
+                _phase != 'activationPending')
               Positioned.fill(
                 child: Align(
                   alignment: Alignment.topRight,
@@ -758,39 +859,80 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Widget _buildPhase(AppColors colors, Color onSurface) {
     switch (_phase) {
-      case 'checking':
-        return const SizedBox.shrink();
-      case 'registered':
-        return const SizedBox.shrink();
       case 'failed':
-        return const SizedBox.shrink();
+        // 检测失败：明确展示原因与「重试检测」按钮，
+        // 不依赖右上角刷新图标
+        return _buildError(onSurface);
+      case 'activating':
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: RegisterDimens.stepIconSize,
+              height: RegisterDimens.stepIconSize,
+              child: CircularProgressIndicator(
+                strokeWidth: RegisterDimens.stepLoadingStrokeWidth,
+                color: onSurface.withValues(alpha: RegisterDimens.errorAlpha),
+              ),
+            ),
+          ],
+        );
+      case 'activationPending':
+        return _buildActivationPending(colors, onSurface);
       case 'unregistered':
         return _error != null
             ? _buildError(onSurface)
             : _buildRegisterButton(colors);
-      case 'naming':
-        return const SizedBox.shrink();
-      case 'login':
-        return const SizedBox.shrink();
-      case 'done':
-        return const SizedBox.shrink();
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  /// 注册成功但建绑/会话未完成：重试激活 / 短信找回 / 返回上一页，
+  /// 不留无法继续的死路，也不会重复创建用户
+  Widget _buildActivationPending(AppColors colors, Color onSurface) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '账号已创建，但建立会话失败\n${_activationError ?? ''}',
+          style: TextStyle(
+            fontSize: RegisterDimens.errorFontSize,
+            color: onSurface.withValues(alpha: RegisterDimens.errorAlpha),
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: RegisterDimens.errorRetryGap),
+        _buildRegisteredButton(colors, '重试建立会话', _resumeActivation),
+        const SizedBox(height: RegisterDimens.stepGap),
+        _buildRegisteredButton(colors, '短信找回', _openSmsLogin),
+        const SizedBox(height: RegisterDimens.stepGap),
+        TextButton(
+          onPressed: () => Navigator.of(context).maybePop(),
+          child: Text(
+            '返回上一页',
+            style: TextStyle(
+              fontSize: RegisterDimens.stepFontSize,
+              color: onSurface.withValues(alpha: RegisterDimens.errorAlpha),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildError(Color onSurface) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(_error!,
+        Text(_error ?? '检测失败，请重试',
             style: TextStyle(
               fontSize: RegisterDimens.errorFontSize,
               color: onSurface.withValues(alpha: RegisterDimens.errorAlpha),
             ),
             textAlign: TextAlign.center),
         const SizedBox(height: RegisterDimens.errorRetryGap),
-        TextButton(onPressed: _check, child: const Text('重试')),
+        TextButton(onPressed: _check, child: const Text('重试检测')),
       ],
     );
   }

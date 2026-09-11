@@ -37,10 +37,26 @@ class ApiService {
   static const _useMock = false;
 
   /// 共享 HTTP 客户端：复用 TCP/TLS 连接，避免每次请求重新握手
-  static final http.Client _client = http.Client();
+  static http.Client _client = http.Client();
+
+  /// 测试注入 MockClient；生产代码不要使用
+  @visibleForTesting
+  static set debugHttpClient(http.Client client) => _client = client;
 
   /// 最近一次 API 调用失败的错误消息（用于前端展示审核拒绝原因）
   static String? lastError;
+
+  /// 网络层错误消息常量：SessionService 依此区分「可重试的网络错误」
+  /// 与「业务错误」（token 失效 / 设备未绑定 / 切号锁等）
+  static const errNetwork = '网络连接失败';
+  static const errTimeout = '服务器响应超时，请重试';
+  static const errMissingField = '响应缺少字段';
+
+  /// 是否为网络层错误（超时/断连）：此类错误绝不应触发切号或 secret 轮换
+  static bool isNetworkError(String? e) => e == errNetwork || e == errTimeout;
+
+  static String _networkErrorOf(Object e) =>
+      e is TimeoutException ? errTimeout : errNetwork;
 
   /// rename 返回 RENAME_TOO_FREQUENT 时解析出的下次可改时间
   static DateTime? lastNextRenameAt;
@@ -450,9 +466,11 @@ class ApiService {
   static const _userBase = 'https://tree.leisure.xin/node/user';
 
   /// POST /user/check — 纯查询，不消耗验证码/PoW，返回该指纹是否已注册
+  /// 失败返回 null 并设置 lastError（网络/超时/服务端错误），成功清空旧错误
   static Future<bool?> check({
     required DeviceFingerprint deviceFingerPrint,
   }) async {
+    lastError = null;
     try {
       final res = await _client
           .post(
@@ -465,13 +483,22 @@ class ApiService {
           .timeout(_timeout);
       if (_isHttpSuccess(res.statusCode)) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
-        return data['registered'] as bool? ?? false;
+        final registered = data['registered'] as bool?;
+        if (registered == null) {
+          lastError = errMissingField;
+          debugPrint('[ApiService] check missing registered: ${res.body}');
+          return null;
+        }
+        lastError = null;
+        return registered;
       }
+      lastError = _parseErrorMessage(res.body);
       debugPrint(
         '[ApiService] check status=${res.statusCode} body=${res.body}',
       );
       return null;
     } catch (e) {
+      lastError = _networkErrorOf(e);
       debugPrint('[ApiService] check error: $e');
       return null;
     }
@@ -481,6 +508,7 @@ class ApiService {
   /// Redis 凭证（10 分钟有效，注册失败可复用，注册成功后销毁），
   /// 返回 captcha_ticket；失败返回 null 并设置 lastError
   static Future<String?> verifyCaptcha(String captchaVerifyParam) async {
+    lastError = null;
     try {
       final res = await _client
           .post(
@@ -492,8 +520,11 @@ class ApiService {
       if (_isHttpSuccess(res.statusCode)) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final ticket = data['captcha_ticket'] as String?;
-        if (ticket != null) return ticket;
-        lastError = '响应缺少字段';
+        if (ticket != null) {
+          lastError = null;
+          return ticket;
+        }
+        lastError = errMissingField;
         debugPrint('[ApiService] captcha/verify missing ticket');
         return null;
       }
@@ -503,8 +534,7 @@ class ApiService {
       );
       return null;
     } catch (e) {
-      lastError =
-          e is TimeoutException ? '服务器响应超时，请重试' : '网络连接失败';
+      lastError = _networkErrorOf(e);
       debugPrint('[ApiService] captcha/verify error: $e');
       return null;
     }
@@ -514,17 +544,23 @@ class ApiService {
   /// 验证码改为阿里云验证码 2.0（后端 VerifyIntelligentCaptcha）
   /// [captchaTicket] 优先：即时校验通过的 Redis 凭证；为空时回退直传
   /// [verificationCaptcha]（captchaVerifyParam）
+  /// [registrationRequestId] 幂等键：同一次注册尝试重试时必须复用同一 ID，
+  /// 服务端凭此保证只创建一个用户；响应丢失时可凭 ID 查询原注册结果
   static Future<RegisterResult?> registerV2({
     required String userDisplayId,
     required DeviceFingerprint deviceFingerPrint,
     String? verificationCaptcha,
     String? captchaTicket,
     required PoWResult verificationPow,
+    String? registrationRequestId,
   }) async {
+    lastError = null;
     try {
       final requestBody = {
         'user_display_id': userDisplayId,
         'device_finger_print': deviceFingerPrint.toJson(),
+        if (registrationRequestId != null)
+          'registration_request_id': registrationRequestId,
         if (captchaTicket != null)
           'verification_captcha_ticket': captchaTicket
         else
@@ -549,9 +585,10 @@ class ApiService {
         final token = data['user_token'] as String?;
         final secret = data['device_secret'] as String?;
         if (token != null && secret != null) {
+          lastError = null;
           return RegisterResult(userToken: token, deviceSecret: secret);
         }
-        lastError = '响应缺少字段';
+        lastError = errMissingField;
         debugPrint('[ApiService] registerV2 missing fields');
       } else {
         lastError = _parseErrorMessage(res.body);
@@ -563,9 +600,37 @@ class ApiService {
     } catch (e) {
       // 区分超时与连接失败：超时多为服务端处理慢（如阿里云 verify 耗时长），
       // 提示用户重试而非误导为断网
-      lastError =
-          e is TimeoutException ? '服务器响应超时，请重试' : '网络连接失败';
+      lastError = _networkErrorOf(e);
       debugPrint('[ApiService] registerV2 error: $e');
+      return null;
+    }
+  }
+
+  /// GET /user/registerV2/result — 按注册请求 ID 查询已完成的注册结果。
+  /// 用于响应丢失恢复：registerV2 超时/断连但服务端已建号时，凭
+  /// [registrationRequestId] 取回 user_token + device_secret，避免重复建号。
+  /// 未完成/不存在返回 null（不写 lastError，避免覆盖 registerV2 的错误）。
+  static Future<RegisterResult?> fetchRegistrationResult(
+    String registrationRequestId,
+  ) async {
+    try {
+      final uri = Uri.parse('$_userBase/registerV2/result').replace(
+        queryParameters: {'registration_request_id': registrationRequestId},
+      );
+      final res = await _client.get(uri).timeout(_timeout);
+      if (!_isHttpSuccess(res.statusCode)) {
+        debugPrint(
+          '[ApiService] registerV2/result status=${res.statusCode}',
+        );
+        return null;
+      }
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final token = data['user_token'] as String?;
+      final secret = data['device_secret'] as String?;
+      if (token == null || secret == null) return null;
+      return RegisterResult(userToken: token, deviceSecret: secret);
+    } catch (e) {
+      debugPrint('[ApiService] registerV2/result error: $e');
       return null;
     }
   }
@@ -593,6 +658,7 @@ class ApiService {
     required String userToken,
     required String fingerprintHash,
   }) async {
+    lastError = null;
     try {
       final res = await _client
           .post(
@@ -607,10 +673,11 @@ class ApiService {
       if (_isHttpSuccess(res.statusCode)) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         try {
+          lastError = null;
           return LoginResult.fromJson(data);
         } catch (e) {
           debugPrint('[ApiService] login parse error: $e body=${res.body}');
-          lastError = '登录响应解析失败';
+          lastError = errMissingField;
           return null;
         }
       }
@@ -621,7 +688,7 @@ class ApiService {
       return null;
     } catch (e) {
       debugPrint('[ApiService] login error: $e');
-      lastError = '网络连接失败';
+      lastError = _networkErrorOf(e);
       return null;
     }
   }
@@ -632,6 +699,7 @@ class ApiService {
     required String fingerprintHash,
     required String deviceSecret,
   }) async {
+    lastError = null;
     try {
       final res = await _client
           .post(
@@ -647,12 +715,13 @@ class ApiService {
       if (_isHttpSuccess(res.statusCode)) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         try {
+          lastError = null;
           return BindingCreateResult.fromJson(data);
         } catch (e) {
           debugPrint(
             '[ApiService] createBinding parse error: $e body=${res.body}',
           );
-          lastError = '建绑响应解析失败';
+          lastError = errMissingField;
           return null;
         }
       }
@@ -663,7 +732,7 @@ class ApiService {
       return null;
     } catch (e) {
       debugPrint('[ApiService] createBinding error: $e');
-      lastError = '网络连接失败';
+      lastError = _networkErrorOf(e);
       return null;
     }
   }
@@ -675,6 +744,7 @@ class ApiService {
     required String deviceSecret,
     required String fingerprintHash,
   }) async {
+    lastError = null;
     try {
       final res = await _client
           .post(
@@ -692,11 +762,13 @@ class ApiService {
         final sessionId = data['session_id'] as int?;
         final sessionSecret = data['session_secret'] as String?;
         if (sessionId != null && sessionSecret != null) {
+          lastError = null;
           return SessionCreateResult(
             sessionId: sessionId,
             sessionSecret: sessionSecret,
           );
         }
+        lastError = errMissingField;
         debugPrint('[ApiService] createSession missing fields: ${res.body}');
         return null;
       }
@@ -707,6 +779,7 @@ class ApiService {
       return null;
     } catch (e) {
       debugPrint('[ApiService] createSession error: $e');
+      lastError = _networkErrorOf(e);
       return null;
     }
   }

@@ -30,6 +30,14 @@ export class RegisterV2Dto {
   @MaxLength(64)
   verification_captcha_ticket?: string;
 
+  /** 客户端生成的注册请求幂等 ID（uuid）。同一注册尝试的重试复用同一 ID：
+   * 服务端凭此保证只创建一个用户；响应丢失时可凭 ID 查询原注册结果
+   * （GET /user/registerV2/result）。 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  registration_request_id?: string;
+
   @ValidateNested()
   @Type(() => PoWVerificationDto)
   verification_pow: PoWVerificationDto;

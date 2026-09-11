@@ -1,7 +1,10 @@
 import {
   BadRequestException,
+  HttpException,
   Inject,
   Injectable,
+  Logger,
+  NotFoundException,
   UnauthorizedException,
   forwardRef,
 } from '@nestjs/common';
@@ -46,6 +49,8 @@ const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class UserLoginService {
+  private readonly logger = new Logger(UserLoginService.name);
+
   constructor(
     @InjectRepository(FingerprintEntity)
     private readonly fingerprintRepo: Repository<FingerprintEntity>,
@@ -119,11 +124,42 @@ export class UserLoginService {
    * 注册 v2：阿里云验证码（无痕验证）。
    * captchaVerifyParam 一次性（复用/过期返回 F008），无需 consume；
    * 与 v1 共用建号逻辑，v1 的 Turnstile 流程不受影响。
+   *
+   * 幂等：客户端携带 registration_request_id 时——
+   *   - 已有完成结果 → 直接返回原结果（不再校验 captcha/PoW，
+   *     解决响应丢失后 ticket/PoW 已消耗无法重试的问题）；
+   *   - 处理中占位 → 409，客户端稍后凭 ID 查询结果；
+   *   - 否则先写占位再建号，成功后缓存结果 24h。
    */
   async registerV2(dto: RegisterV2Dto): Promise<{
     user_token: string;
     device_secret: string;
   }> {
+    const reqId = dto.registration_request_id?.trim();
+    const idemKey = reqId ? `register:req:${reqId}` : null;
+    if (idemKey) {
+      const cached = await this.redisService.client.get(idemKey);
+      if (cached) {
+        if (cached === 'processing') {
+          throw new HttpException('注册请求处理中，请稍后查询结果', 409);
+        }
+        return JSON.parse(cached);
+      }
+      // 占位防并发重复建号（2 分钟，覆盖建号+阿里云校验耗时）
+      const claimed = await this.redisService.client.set(
+        idemKey,
+        'processing',
+        'EX',
+        120,
+        'NX',
+      );
+      if (claimed !== 'OK') {
+        const again = await this.redisService.client.get(idemKey);
+        if (again && again !== 'processing') return JSON.parse(again);
+        throw new HttpException('注册请求处理中，请稍后查询结果', 409);
+      }
+    }
+
     // 凭证模式：通过测试页即时校验后签发的 Redis ticket（注册失败可复用，
     // 仅注册成功后销毁）；否则回退为直接校验 captchaVerifyParam（旧客户端）
     let captchaTicket: string | null = null;
@@ -160,7 +196,35 @@ export class UserLoginService {
       await this.redisService.client.del(`captcha:ticket:${captchaTicket}`);
     }
 
+    // 缓存注册结果 24h：响应丢失后客户端凭 registration_request_id 取回
+    if (idemKey) {
+      await this.redisService.client.set(
+        idemKey,
+        JSON.stringify(result),
+        'EX',
+        86400,
+      );
+    }
+
     return result;
+  }
+
+  /**
+   * 按注册请求 ID 查询已完成的注册结果（响应丢失恢复）。
+   * 已完成 → 200 返回 { user_token, device_secret }；
+   * 处理中/不存在 → 404，客户端按原错误提示重试。
+   */
+  async getRegistrationResult(requestId: string): Promise<{
+    user_token: string;
+    device_secret: string;
+  }> {
+    const cached = await this.redisService.client.get(
+      `register:req:${requestId.trim()}`,
+    );
+    if (!cached || cached === 'processing') {
+      throw new NotFoundException('REGISTRATION_RESULT_NOT_FOUND');
+    }
+    return JSON.parse(cached);
   }
 
   /**
@@ -226,7 +290,6 @@ export class UserLoginService {
 
     // 昵称不得与其他用户当前名或历史名冲突
     await this.userService.assertDisplayIdAvailable(dto.user_display_id);
-    await this.userService.assertDisplayIdModerated(dto.user_display_id);
 
     // 手机号注册时校验手机号可用
     if (dto.phone) {
@@ -300,49 +363,133 @@ export class UserLoginService {
 
   // ── 手机号验证码 ──
 
-  /** 发送短信验证码 */
+  /**
+   * 发送短信验证码；携带 fingerprint_hash 时判定模式并返回：
+   *   login    手机号已注册 → 验证后走 /user/sms/login
+   *   register 手机号未注册 → 验证后走 /user/sms/register 注册新账户
+   * 阿里云发送场景随模式选择，保证与后续校验接口的 scene 一致。
+   * （绑定到本机主设备账户的找回只在「找回原用户」链路进行）
+   */
   async sendSmsCode(
     dto: SendSmsCodeDto,
     remoteIp?: string,
-  ): Promise<{ sent: boolean; cooldown_seconds: number }> {
-    return this.smsService.sendCode(dto, remoteIp);
-  }
+  ): Promise<{
+    sent: boolean;
+    cooldown_seconds: number;
+    mode?: 'login' | 'register';
+  }> {
+    let aliScene = dto.scene;
+    let mode: 'login' | 'register' | undefined;
 
-  /** 手机号验证码注册：一步完成建号 + 建绑 */
-  async smsRegister(
-    dto: SmsRegisterDto,
-    remoteIp?: string,
-  ): Promise<{ user_token: string; device_secret: string }> {
-    // 与 registerV2 一致走阿里云验证码（captcha token 一次性，无需 consume）
-    const captchaResult = await this.verificationService.verify(
-      'captcha', dto.verification_captcha, remoteIp,
-    );
-    if (!captchaResult.success) {
-      throw new BadRequestException(captchaResult.message ?? '验证码验证失败');
+    if (dto.fingerprint_hash) {
+      mode = await this.resolveSmsMode(dto.phone);
+      aliScene = mode === 'register' ? 'register' : 'login';
+    } else if (dto.scene === 'login') {
+      // 旧版找回页：手机号与本机账户不符时拦截，引导注册
+      const mismatch = await this.checkPhoneForDeviceAccount(
+        dto.phone,
+        dto.fingerprint_hash ?? '',
+      );
+      if (mismatch) {
+        throw new BadRequestException('PHONE_MISMATCH_FOR_DEVICE');
+      }
     }
 
-    const powValid = await this.powStrategy.verify(
-      dto.verification_pow.challenge_id, dto.verification_pow.nonce,
+    const result = await this.smsService.sendCode(
+      { ...dto, scene: aliScene },
+      remoteIp,
     );
-    if (!powValid) throw new BadRequestException('PoW 验证失败');
+    return mode ? { ...result, mode } : result;
+  }
 
+  /**
+   * 判定手机号对应的处理模式（见 sendSmsCode）
+   */
+  private async resolveSmsMode(
+    phone: string,
+  ): Promise<'login' | 'register'> {
+    const user = await this.userService.findUserByPhone(phone);
+    return user ? 'login' : 'register';
+  }
+
+  /**
+   * 本机指纹对应的活绑定账户，以本机为主设备者优先；
+   * 无法唯一识别（无指纹/无绑定/候选不唯一）返回 null
+   */
+  private async findPrimaryDeviceAccount(
+    fingerprintHash: string,
+  ): Promise<UserEntity | null> {
+    const fps = await this.fingerprintRepo.find({
+      where: { fingerprint_hash: fingerprintHash },
+    });
+    if (fps.length === 0) return null;
+
+    const deviceIds = [...new Set(fps.map((fp) => fp.device_id))];
+    const bindings = await this.bindingRepo.find({
+      where: {
+        device_id: In(deviceIds),
+        status: In(['active', 'unbind_pending']),
+      },
+    });
+    const userIds = [...new Set(bindings.map((b) => b.user_id))];
+    if (userIds.length === 0) return null;
+
+    const users = await this.userRepo.find({ where: { user_id: In(userIds) } });
+    let candidates = users;
+    const byPrimary = users.filter(
+      (u) =>
+        u.primary_device_id != null && deviceIds.includes(u.primary_device_id),
+    );
+    if (byPrimary.length >= 1) candidates = byPrimary;
+    if (candidates.length !== 1) {
+      this.logger.warn(
+        `本机账户无法唯一识别：活绑定 ${userIds.length} 个，消歧后 ${candidates.length} 个`,
+      );
+      return null;
+    }
+    return candidates[0];
+  }
+
+  /**
+   * 找回发送前置校验（旧版找回页）：识别本机账户后比对手机号——
+   * 账户已绑其他手机号时返回 true，客户端应提示并引导注册。
+   */
+  private async checkPhoneForDeviceAccount(
+    phone: string,
+    fingerprintHash: string,
+  ): Promise<boolean> {
+    const account = await this.findPrimaryDeviceAccount(fingerprintHash);
+    if (!account) return false;
+    if (!account.phone) return false;
+    return account.phone !== this.userService.normalizePhone(phone);
+  }
+
+  /**
+   * 手机号验证码注册：一步完成建号 + 建绑（含手机号绑定与主设备设定）。
+   * 防刷依赖短信送达本身（发送侧 60s 冷却/每日上限/IP 限流 + 验证码核验），
+   * 不再做 CAPTCHA/PoW 校验。
+   */
+  async smsRegister(dto: SmsRegisterDto): Promise<{
+    user_token: string;
+    device_secret: string;
+  }> {
     await this.smsService.verifyCode(dto.phone, 'register', dto.code);
 
-    const result = await this.createUserAndDevice({
+    // createUserAndDevice 内：校验手机号未被占用；新账户以注册设备为主设备
+    //（primary_device_id）；已注册设备复用建新号并轮换 secret
+    return this.createUserAndDevice({
       user_display_id: dto.user_display_id,
       device_finger_print: dto.device_finger_print,
       phone: dto.phone,
       create_binding: true,
     });
-
-    await this.powStrategy.consume(dto.verification_pow.challenge_id);
-
-    return result;
   }
 
   /**
    * 手机号验证码登录：直接签发 session。
    * 未注册手机号存在找回路径：见 recoverUserByFingerprint。
+   * 主设备规则：以本机为主设备的账户登录不受切号锁限制；非主设备账户
+   * 照常检查切号锁（DEVICE_SESSION_LOCKED）。
    * 响应携带 user_token，客户端据此登记本机账户令牌（切号/failover 依赖）。
    */
   async smsLogin(dto: SmsLoginDto): Promise<{
@@ -360,7 +507,14 @@ export class UserLoginService {
 
     const device = await this.resolveDeviceForUser(user.user_id, dto.fingerprint_hash);
 
-    await this.assertDeviceOwnerAllowed(user.user_id, device.device_id);
+    // 主设备规则：以本机为主设备的账户即设备归属账户，登录不受切号锁限制；
+    // 非主设备账户照常检查切号锁（被异用户占用时 DEVICE_SESSION_LOCKED），
+    // 允许在锁未占用时登录
+    if (user.primary_device_id === device.device_id) {
+      // 主设备登录：无切号锁
+    } else {
+      await this.assertDeviceOwnerAllowed(user.user_id, device.device_id);
+    }
 
     // 自动建绑（新设备或解绑后重新登录）
     await this.userBindingService.ensureLiveBinding(user.user_id, device.device_id);
@@ -380,42 +534,25 @@ export class UserLoginService {
   }
 
   /**
-   * 未注册手机号的账户找回：
-   * 本机指纹对应的活绑定账户中，若恰好只有一个从未绑定过手机号的账户，
-   * 则视为找回该账户，并把该手机号绑定为账户手机号（到此处短信验证码已通过，
-   * 且全库无任何用户占用该手机号）。候选为 0 个或多个时保持 USER_NOT_FOUND，
-   * 前者是无匹配设备，后者是无法消歧——已绑手机的账户仍须用绑定手机号找回。
+   * 未注册手机号的账户找回：以本机为主设备的账户若从未绑定过手机号，
+   * 则视为找回该账户——把该手机号绑定为账户手机号（短信验证码已通过，
+   * 且全库无其他用户占用该号码）。主设备账户不存在或已绑手机号时返回
+   * null（已绑手机的账户必须用绑定手机号找回）。
    */
   private async recoverUserByFingerprint(
     phone: string,
     fingerprintHash: string,
   ): Promise<UserEntity | null> {
-    const fps = await this.fingerprintRepo.find({
-      where: { fingerprint_hash: fingerprintHash },
-    });
-    if (fps.length === 0) return null;
+    const account = await this.findPrimaryDeviceAccount(fingerprintHash);
+    if (!account || account.phone) return null;
 
-    const bindings = await this.bindingRepo.find({
-      where: {
-        device_id: In(fps.map((fp) => fp.device_id)),
-        status: In(['active', 'unbind_pending']),
-      },
-    });
-    const userIds = [...new Set(bindings.map((b) => b.user_id))];
-    if (userIds.length === 0) return null;
-
-    const users = await this.userRepo.find({ where: { user_id: In(userIds) } });
-    const candidates = users.filter((u) => !u.phone);
-    if (candidates.length !== 1) return null;
-
-    const user = candidates[0];
     const normalized = this.userService.normalizePhone(phone);
     await this.userRepo.update(
-      { user_id: user.user_id },
+      { user_id: account.user_id },
       { phone: normalized },
     );
-    user.phone = normalized;
-    return user;
+    account.phone = normalized;
+    return account;
   }
 
   /** 当前 session 用户绑定/换绑手机号 */
