@@ -611,8 +611,11 @@ class ApiService {
   /// [registrationRequestId] 取回 user_token + device_secret，避免重复建号。
   /// 未完成/不存在返回 null（不写 lastError，避免覆盖 registerV2 的错误）。
   static Future<RegisterResult?> fetchRegistrationResult(
-    String registrationRequestId,
-  ) async {
+    String registrationRequestId, {
+    bool preserveLastError = true,
+  }) async {
+    final previousError = lastError;
+    if (!preserveLastError) lastError = null;
     try {
       final uri = Uri.parse('$_userBase/registerV2/result').replace(
         queryParameters: {'registration_request_id': registrationRequestId},
@@ -622,16 +625,27 @@ class ApiService {
         debugPrint(
           '[ApiService] registerV2/result status=${res.statusCode}',
         );
+        if (!preserveLastError && res.statusCode != 404) {
+          lastError = _parseErrorMessage(res.body);
+        }
         return null;
       }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final token = data['user_token'] as String?;
       final secret = data['device_secret'] as String?;
-      if (token == null || secret == null) return null;
+      if (token == null || secret == null) {
+        if (!preserveLastError) lastError = errMissingField;
+        return null;
+      }
       return RegisterResult(userToken: token, deviceSecret: secret);
     } catch (e) {
       debugPrint('[ApiService] registerV2/result error: $e');
+      if (!preserveLastError) {
+        lastError = e is TimeoutException ? errTimeout : errNetwork;
+      }
       return null;
+    } finally {
+      if (preserveLastError) lastError = previousError;
     }
   }
 

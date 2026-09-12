@@ -32,8 +32,8 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
-  // checking | registered | failed | unregistered | registering | naming
-  // | activating | activationPending | login | done
+  // checking | recovering | registered | failed | unregistered | registering
+  // | naming | activating | activationPending | login | done
   String _phase = 'checking';
   String? _error;
 
@@ -83,10 +83,19 @@ class _RegisterPageState extends State<RegisterPage> {
     } else if (PostStorage.isActivationPending()) {
       // 上次注册已建号但激活中断：直接恢复激活，不重新检测/注册
       _phase = 'activating';
-      _resumeActivation();
+      unawaited(_resumeActivation());
     } else {
-      _check();
-      _preFetchPow();
+      final savedRequestId = PostStorage.getRegistrationRequestId()?.trim();
+      if (savedRequestId != null && savedRequestId.isNotEmpty) {
+        // 上次请求可能已在服务端建号，但客户端在收到响应、落盘 token 前
+        // 退出。必须先按幂等 ID 取回结果，不能直接发起新注册。
+        _registrationRequestId = savedRequestId;
+        _phase = 'recovering';
+        unawaited(_recoverInterruptedRegistration(savedRequestId));
+      } else {
+        unawaited(_check());
+        _preFetchPow();
+      }
     }
   }
 
@@ -114,6 +123,7 @@ class _RegisterPageState extends State<RegisterPage> {
       get _phaseImageConfig {
     switch (_phase) {
       case 'checking':
+      case 'recovering':
       case 'registering':
       case 'activating':
         return (
@@ -172,6 +182,8 @@ class _RegisterPageState extends State<RegisterPage> {
     switch (_phase) {
       case 'checking':
         return '让我康康';
+      case 'recovering':
+        return '正在恢复注册';
       case 'unregistered':
         return '您的设备可进行注册';
       case 'registered':
@@ -267,10 +279,16 @@ class _RegisterPageState extends State<RegisterPage> {
 
   /// 重置页面状态，重新检测
   void _reset() {
+    // 已建号的注册只能重试激活；此时清掉请求 ID 或重新检测会把用户带到
+    // “设备已注册”的短信分支，并丢失当前恢复上下文。
+    if (PostStorage.isActivationPending()) {
+      unawaited(_resumeActivation());
+      return;
+    }
     // 使旧检测请求立即失效（序号守卫），并丢弃旧的注册幂等 ID
     _checkSeq++;
     _registrationRequestId = null;
-    PostStorage.clearRegistrationRequestId();
+    unawaited(PostStorage.clearRegistrationRequestId());
     _nameController.clear();
     _tokenController.clear();
     _prePowNonce = null;
@@ -386,6 +404,9 @@ class _RegisterPageState extends State<RegisterPage> {
         return;
       }
 
+      // 若从已有账号环境进入注册，先清掉旧顶层 session，避免新的 token
+      // 与旧账户 session 在激活失败窗口内形成交叉状态。
+      await DeviceCredentialStore.clearSession();
       await DeviceCredentialStore.saveUserExternalToken(result.userToken);
       await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
       await DeviceCredentialStore.saveDeviceSecret(result.deviceSecret);
@@ -405,6 +426,52 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
+  /// 应用在 registerV2 已提交后退出时，凭持久化请求 ID 取回同一建号结果。
+  /// 查不到结果时再回到设备检测；保留请求 ID，后续提交仍复用它。
+  Future<void> _recoverInterruptedRegistration(String requestId) async {
+    final result = await ApiService.fetchRegistrationResult(
+      requestId,
+      preserveLastError: false,
+    );
+    if (!mounted || _registrationRequestId != requestId) return;
+
+    if (result == null) {
+      if (ApiService.isNetworkError(ApiService.lastError)) {
+        setState(() {
+          _phase = 'failed';
+          _error = ApiService.lastError;
+        });
+        return;
+      }
+      unawaited(_check());
+      _preFetchPow();
+      return;
+    }
+
+    try {
+      final fp = await DeviceFingerprintService.collect();
+      if (!mounted || _registrationRequestId != requestId) return;
+
+      await DeviceCredentialStore.clearSession();
+      await DeviceCredentialStore.saveUserExternalToken(result.userToken);
+      await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
+      await DeviceCredentialStore.saveDeviceSecret(result.deviceSecret);
+      await DeviceCredentialStore.saveRegisteredFingerprint(
+        jsonEncode(fp.toJson()),
+      );
+      await PostStorage.setActivationPending(true);
+      if (!mounted) return;
+      setState(() => _phase = 'activating');
+      await _activatePending(result.userToken);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _phase = 'failed';
+        _error = '恢复注册凭证失败，请重试';
+      });
+    }
+  }
+
   /// 建绑 → 建会话；成功才置 registered=true，失败进入 activationPending
   /// （不重试 registerV2，不重复建号；token/secret 已落盘保留）
   Future<void> _activatePending(String userToken) async {
@@ -420,11 +487,27 @@ class _RegisterPageState extends State<RegisterPage> {
     }
     await PostStorage.setActivationPending(false);
     await PostStorage.setRegistered(true);
+    await _syncDisplayNameFromProfile();
     await PostStorage.clearRegistrationRequestId();
     _registrationRequestId = null;
     if (!mounted) return;
     setState(() => _phase = 'done');
     Navigator.pop(context);
+  }
+
+  /// 启动恢复路径没有本地昵称输入值；激活成功后从服务端补齐。
+  /// 昵称同步失败不应回滚已经成功的账号激活。
+  Future<void> _syncDisplayNameFromProfile() async {
+    final sessionId = await DeviceCredentialStore.getSessionId();
+    final sessionSecret = await DeviceCredentialStore.getSessionSecret();
+    if (sessionId == null || sessionSecret == null) return;
+    final profile = await ApiService.getUserProfile(
+      sessionId: sessionId,
+      sessionSecret: sessionSecret,
+    );
+    if (profile != null && profile.userDisplayId.isNotEmpty) {
+      await PostStorage.saveDisplayName(profile.userDisplayId);
+    }
   }
 
   /// activationPending 阶段的「重试建立会话」/ 重启后自动恢复入口：
@@ -765,6 +848,7 @@ class _RegisterPageState extends State<RegisterPage> {
             // 右上角重新加载（相对右上角偏移）；激活阶段隐藏，
             // 防止 _reset 丢弃待激活状态导致重复注册
             if (!widget.startAtLogin &&
+                _phase != 'recovering' &&
                 _phase != 'activating' &&
                 _phase != 'activationPending')
               Positioned.fill(
@@ -806,7 +890,16 @@ class _RegisterPageState extends State<RegisterPage> {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const SmsRegisterPage()),
     );
-    if (ok == true && mounted) Navigator.pop(context);
+    if (!mounted) return;
+    if (ok == true) {
+      Navigator.pop(context);
+      return;
+    }
+    // 子页中建号成功后用户可能在激活失败状态直接返回；父页接管恢复，
+    // 避免仍停留在“该设备环境已注册”的旧页面状态。
+    if (PostStorage.isActivationPending()) {
+      await _resumeActivation();
+    }
   }
 
   Future<void> _contactQQ() async {
@@ -864,6 +957,7 @@ class _RegisterPageState extends State<RegisterPage> {
         // 不依赖右上角刷新图标
         return _buildError(onSurface);
       case 'activating':
+      case 'recovering':
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [

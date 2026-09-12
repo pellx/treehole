@@ -78,7 +78,12 @@ class SessionService {
     if (_pending != null) return _pending!.future;
     _pending = Completer<bool>();
     try {
-      final result = await _ensureSessionInternal();
+      // registerV2/smsRegister 已建号但尚未完成激活时，必须优先补建
+      // binding/session。若走普通 ensureSession，DEVICE_NOT_BOUND 会被当成
+      // 正式解绑并清掉刚保存的 token，导致注册无法恢复。
+      final result = PostStorage.isActivationPending()
+          ? await resumePendingActivation()
+          : await _ensureSessionInternal();
       if (result) {
         await _syncRealtime();
       } else {
@@ -643,6 +648,7 @@ class SessionService {
         // 凭证已丢失（如调试清数据）：无法恢复，清除 pending 避免死循环
         await PostStorage.setActivationPending(false);
         await PostStorage.clearRegistrationRequestId();
+        ApiService.lastError = '待激活账号凭证已丢失，请使用短信找回账户';
         _pendingActivation!.complete(false);
         return false;
       }
@@ -655,6 +661,12 @@ class SessionService {
       }
       _pendingActivation!.complete(ok);
       return ok;
+    } catch (e) {
+      ApiService.lastError = '恢复注册会话失败，请重试';
+      if (!_pendingActivation!.isCompleted) {
+        _pendingActivation!.complete(false);
+      }
+      return false;
     } finally {
       _pendingActivation = null;
     }

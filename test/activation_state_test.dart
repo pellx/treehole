@@ -36,17 +36,24 @@ void main() {
     expect(PostStorage.isActivationPending(), isFalse);
   });
 
-  test('registered 与 activationPending 相互独立', () async {
+  test('activationPending=true 会强制 registered=false', () async {
     // 关键不变量：registered=true 只能在激活完成后置位，
     // pending 期间 registered 必须保持 false
     await PostStorage.setActivationPending(true);
     expect(PostStorage.isRegistered(), isFalse);
 
     await PostStorage.setRegistered(true);
-    expect(PostStorage.isActivationPending(), isTrue);
+    expect(PostStorage.isRegistered(), isTrue);
 
-    // 激活完成：清 pending，保留 registered
+    // 从已有登录账号切到短信新注册时，registered 原本可能为 true；
+    // 一旦进入待激活，必须立即回到 false。
+    await PostStorage.setActivationPending(true);
+    expect(PostStorage.isActivationPending(), isTrue);
+    expect(PostStorage.isRegistered(), isFalse);
+
+    // 激活完成：先清 pending，再由调用方在 session 成功后置 registered
     await PostStorage.setActivationPending(false);
+    await PostStorage.setRegistered(true);
     expect(PostStorage.isRegistered(), isTrue);
     expect(PostStorage.isActivationPending(), isFalse);
 

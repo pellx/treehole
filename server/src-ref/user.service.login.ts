@@ -160,53 +160,68 @@ export class UserLoginService {
       }
     }
 
-    // 凭证模式：通过测试页即时校验后签发的 Redis ticket（注册失败可复用，
-    // 仅注册成功后销毁）；否则回退为直接校验 captchaVerifyParam（旧客户端）
-    let captchaTicket: string | null = null;
-    if (dto.verification_captcha_ticket) {
-      const exists = await this.redisService.client.exists(
-        `captcha:ticket:${dto.verification_captcha_ticket}`,
-      );
-      if (exists !== 1) {
-        throw new BadRequestException('验证码已使用或过期，请重新验证');
+    try {
+      // 凭证模式：通过测试页即时校验后签发的 Redis ticket（注册失败可复用，
+      // 仅注册成功后销毁）；否则回退为直接校验 captchaVerifyParam（旧客户端）
+      let captchaTicket: string | null = null;
+      if (dto.verification_captcha_ticket) {
+        const exists = await this.redisService.client.exists(
+          `captcha:ticket:${dto.verification_captcha_ticket}`,
+        );
+        if (exists !== 1) {
+          throw new BadRequestException('验证码已使用或过期，请重新验证');
+        }
+        captchaTicket = dto.verification_captcha_ticket;
+      } else {
+        const captchaResult = await this.verificationService.verify(
+          'captcha',
+          dto.verification_captcha ?? '',
+        );
+        if (!captchaResult.success) {
+          throw new BadRequestException(
+            captchaResult.message ?? '验证码验证失败',
+          );
+        }
       }
-      captchaTicket = dto.verification_captcha_ticket;
-    } else {
-      const captchaResult = await this.verificationService.verify(
-        'captcha',
-        dto.verification_captcha ?? '',
+
+      const powValid = await this.powStrategy.verify(
+        dto.verification_pow.challenge_id,
+        dto.verification_pow.nonce,
       );
-      if (!captchaResult.success) {
-        throw new BadRequestException(captchaResult.message ?? '验证码验证失败');
+      if (!powValid) throw new BadRequestException('PoW 验证失败');
+
+      const result = await this.createUserAndDevice(dto);
+
+      // 仅使 PoW 失效（captcha token 一次性，无需缓存/consume）
+      await this.powStrategy.consume(dto.verification_pow.challenge_id);
+      // 注册成功才销毁验证凭证
+      if (captchaTicket) {
+        await this.redisService.client.del(`captcha:ticket:${captchaTicket}`);
       }
+
+      // 缓存注册结果 24h：响应丢失后客户端凭 registration_request_id 取回
+      if (idemKey) {
+        await this.redisService.client.set(
+          idemKey,
+          JSON.stringify(result),
+          'EX',
+          86400,
+        );
+      }
+
+      return result;
+    } catch (error) {
+      // 业务失败（昵称占用、验证码/PoW 失败等）没有产生注册结果，必须
+      // 释放 processing 占位；否则客户端复用同一幂等 ID 会被无意义地
+      // 阻塞至 120 秒 TTL 到期。
+      if (idemKey) {
+        const current = await this.redisService.client.get(idemKey);
+        if (current === 'processing') {
+          await this.redisService.client.del(idemKey);
+        }
+      }
+      throw error;
     }
-
-    const powValid = await this.powStrategy.verify(
-      dto.verification_pow.challenge_id,
-      dto.verification_pow.nonce,
-    );
-    if (!powValid) throw new BadRequestException('PoW 验证失败');
-
-    const result = await this.createUserAndDevice(dto);
-
-    // 仅使 PoW 失效（captcha token 一次性，无需缓存/consume）
-    await this.powStrategy.consume(dto.verification_pow.challenge_id);
-    // 注册成功才销毁验证凭证
-    if (captchaTicket) {
-      await this.redisService.client.del(`captcha:ticket:${captchaTicket}`);
-    }
-
-    // 缓存注册结果 24h：响应丢失后客户端凭 registration_request_id 取回
-    if (idemKey) {
-      await this.redisService.client.set(
-        idemKey,
-        JSON.stringify(result),
-        'EX',
-        86400,
-      );
-    }
-
-    return result;
   }
 
   /**

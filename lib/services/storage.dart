@@ -78,6 +78,12 @@ class PostStorage {
   }
 
   static Future<void> setActivationPending(bool value) async {
+    // 待激活账号尚未具备可用 session，不能继续沿用旧账户的“已注册”
+    // 展示状态。特别是已注册设备通过短信创建新账号时，registered 原本
+    // 可能为 true；在这里统一维护不变量，避免调用方遗漏清理。
+    if (value) {
+      await _accountBox.put('registered', false);
+    }
     await _accountBox.put('activation_pending', value);
   }
 

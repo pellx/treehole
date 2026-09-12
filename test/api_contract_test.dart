@@ -127,6 +127,16 @@ void main() {
       // 不覆盖 registerV2 的原始错误
       expect(ApiService.lastError, ApiService.errTimeout);
     });
+
+    test('启动恢复查询断连：可选择报告网络错误', () async {
+      useClient((req) async => throw http.ClientException('down'));
+      final r = await ApiService.fetchRegistrationResult(
+        'req-uuid-y',
+        preserveLastError: false,
+      );
+      expect(r, isNull);
+      expect(ApiService.lastError, ApiService.errNetwork);
+    });
   });
 
   group('check', () {

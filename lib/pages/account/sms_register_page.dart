@@ -205,6 +205,9 @@ class _SmsRegisterPageState extends State<SmsRegisterPage> {
 
     // 与 RegisterPage 注册成功后的落盘一致；关键顺序：先记录
     // 「待激活」，session 建立成功后才置 registered=true
+    // 当前设备可能已经登录旧账号。创建新账号后先清旧顶层 session，
+    // 再切换 token；否则激活失败期间会出现“新 token + 旧 session”。
+    await DeviceCredentialStore.clearSession();
     await DeviceCredentialStore.saveUserExternalToken(result.userToken);
     await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
     await DeviceCredentialStore.saveDeviceSecret(result.deviceSecret);
