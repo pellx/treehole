@@ -37,14 +37,14 @@ class _VersionDetailPageState extends State<VersionDetailPage> {
     if (Platform.isAndroid) {
       final info = await DeviceInfoPlugin().androidInfo;
       final abis = info.supportedAbis;
-      const priority = ['arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'];
+      const priority = ['arm64-v8a', 'armeabi-v7a', 'x86_64'];
       for (final abi in priority) {
         if (abis.contains(abi)) {
           return '${base}treehole-v${v.versionNumber}-$abi.apk';
         }
       }
     }
-    return '${base}treehole-v${v.versionNumber}.apk';
+    return '${base}treehole-v${v.versionNumber}-all.apk';
   }
 
   void _toast(String message) {

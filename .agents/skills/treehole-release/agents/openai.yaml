@@ -1,0 +1,6 @@
+interface:
+  display_name: "树通版本发布"
+  short_description: "构建树通安卓包、发布下载链接、提交 TestFlight 并生成手动版本 SQL"
+  default_prompt: "使用 $treehole-release 发布我显式指定的版本，并报告各平台验收结果。"
+policy:
+  allow_implicit_invocation: false

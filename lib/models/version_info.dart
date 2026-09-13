@@ -1,6 +1,6 @@
 class VersionInfo {
   /// 当前 app 版本号，与 pubspec.yaml 保持一致
-  static const String currentVersion = '1.0.1';
+  static const String currentVersion = '1.1.2';
 
   final int id;
   final String versionNumber;

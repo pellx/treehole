@@ -83,6 +83,7 @@ lib/config/local.dart
 
 # Agent / 本地工具（不入库）
 .hermes/
+.claude/
 .cursor/
 tmp*/
 tmp_*/

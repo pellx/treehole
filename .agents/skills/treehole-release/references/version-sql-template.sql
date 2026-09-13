@@ -1,0 +1,9 @@
+-- Use releases/1.1.2/apply.sql and rollback.sql as the executable pattern.
+-- Substitute the user-specified version, backup table suffix, title, log, description and URL.
+-- Keep actual newline characters in strings; escape single quotes as two quotes.
+-- Always capture preexisting rows BEFORE UPDATE; capture once per connection.
+-- UPDATE by (version_number, platform), then INSERT SELECT WHERE NOT EXISTS.
+-- This is single-operator idempotence, not concurrent uniqueness.
+-- Run SELECT verification inside the transaction; leave COMMIT to the user.
+-- Never delete another release. Backups must survive in a separate persistent export
+-- if the user wants rollback after disconnecting the MySQL session.

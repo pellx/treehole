@@ -20,7 +20,12 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           navigatorKey: navKey,
-          home: LivePopScope(
+          home: const Scaffold(body: Text('home')),
+        ),
+      );
+      navKey.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => LivePopScope(
             recomputeTrigger: blocking,
             canPop: () => !blocking.value,
             onPopInvokedWithResult: (didPop, _) {
@@ -31,6 +36,7 @@ void main() {
         ),
       );
 
+      await tester.pumpAndSettle();
       // 关键：不调用 setState / pumpWidget 重建页面，直接翻转外部状态
       blocking.value = true;
       await tester.pump(); // 只推进帧，页面 build 无变化
@@ -44,7 +50,9 @@ void main() {
       blocking.value = false;
       await tester.pump();
       await navKey.currentState!.maybePop();
+      await tester.pumpAndSettle();
       expect(find.text('page'), findsNothing, reason: 'canPop 恢复后应正常离场');
+      blocking.dispose();
     },
   );
 
@@ -58,7 +66,7 @@ void main() {
       ),
     );
 
-    await navKey.currentState!.push(
+    navKey.currentState!.push(
       MaterialPageRoute(
         builder: (_) => LivePopScope(
           canPop: () => true,
@@ -69,6 +77,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await navKey.currentState!.maybePop();
+    await tester.pumpAndSettle();
     expect(find.text('second'), findsNothing, reason: 'canPop=true 应正常 pop');
     expect(find.text('home'), findsOneWidget);
   });

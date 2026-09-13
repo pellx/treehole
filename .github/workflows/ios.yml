@@ -2,6 +2,18 @@ name: iOS Build and TestFlight
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Explicit marketing version (for example 1.1.2)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-release
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -23,12 +35,12 @@ jobs:
           mkdir -p lib/config
           echo "$LOCAL_DART" > lib/config/local.dart
 
-      - name: Apply Team ID placeholders
+      - name: Validate release configuration
         env:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          sed -i '' "s/YOUR_TEAM_ID/$TEAM_ID/g" ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' "s/YOUR_TEAM_ID/$TEAM_ID/g" ios/ExportOptions.plist
+          python3 scripts/check_ios_release.py config
 
       - name: Install Apple certificate
         env:
@@ -39,6 +51,8 @@ jobs:
           P12_PATH=$RUNNER_TEMP/cert.p12
 
           echo -n "$P12_BASE64" | base64 --decode -o "$P12_PATH"
+          openssl pkcs12 -in "$P12_PATH" -clcerts -nokeys -passin env:P12_PASSWORD -out "$RUNNER_TEMP/signing-cert.pem"
+          openssl x509 -in "$RUNNER_TEMP/signing-cert.pem" -noout -checkend 0
 
           security create-keychain -p "actions" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
@@ -54,8 +68,8 @@ jobs:
           PP_PATH=$RUNNER_TEMP/treehole_app_store.mobileprovision
           echo -n "$PROVISION_BASE64" | base64 --decode -o "$PP_PATH"
 
-          echo "=== Provisioning profile info ==="
-          security cms -D -i "$PP_PATH" | plutil -p - | grep -E "Name|TeamIdentifier|application-identifier|UUID"
+          security cms -D -i "$PP_PATH" > "$RUNNER_TEMP/profile.plist"
+          python3 scripts/check_ios_release.py profile "$RUNNER_TEMP/profile.plist"
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/
@@ -68,6 +82,9 @@ jobs:
 
       - name: Build IPA
         run: flutter build ipa --export-options-plist=ios/ExportOptions.plist --release
+
+      - name: Verify IPA metadata
+        run: python3 scripts/check_ios_release.py ipa
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -83,6 +100,12 @@ jobs:
         run: |
           mkdir -p "$HOME/.private_keys"
           echo -n "$API_KEY_P8" | base64 --decode -o "$HOME/.private_keys/AuthKey_${API_KEY_ID}.p8"
+
+          xcrun altool --validate-app \
+            --type ios \
+            --file build/ios/ipa/*.ipa \
+            --apiKey "$API_KEY_ID" \
+            --apiIssuer "$API_ISSUER_ID"
 
           xcrun altool --upload-app \
             --type ios \
