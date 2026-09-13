@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../models/device_fingerprint.dart';
+import '../../services/account_display.dart';
 import '../../services/api.dart';
 import '../../services/device_credential_store.dart';
 import '../../services/device_fingerprint.dart';
@@ -487,26 +488,38 @@ class _RegisterPageState extends State<RegisterPage> {
     }
     await PostStorage.setActivationPending(false);
     await PostStorage.setRegistered(true);
-    await _syncDisplayNameFromProfile();
     await PostStorage.clearRegistrationRequestId();
     _registrationRequestId = null;
+    // 昵称已经不是注册完成的必要条件；后台同步，避免网络慢时注册页
+    // 在实际成功后仍停留到 profile 请求超时。
+    unawaited(_syncDisplayNameFromProfile());
+    _finishSuccessfully();
+  }
+
+  /// 注册/登录的统一成功出口：把 true 返回给唤起页面，并广播账户展示变化。
+  void _finishSuccessfully({bool notifyDisplayChange = true}) {
     if (!mounted) return;
+    if (notifyDisplayChange) notifyAccountDisplayChanged();
     setState(() => _phase = 'done');
-    Navigator.pop(context);
+    Navigator.of(context).pop(true);
   }
 
   /// 启动恢复路径没有本地昵称输入值；激活成功后从服务端补齐。
   /// 昵称同步失败不应回滚已经成功的账号激活。
   Future<void> _syncDisplayNameFromProfile() async {
-    final sessionId = await DeviceCredentialStore.getSessionId();
-    final sessionSecret = await DeviceCredentialStore.getSessionSecret();
-    if (sessionId == null || sessionSecret == null) return;
-    final profile = await ApiService.getUserProfile(
-      sessionId: sessionId,
-      sessionSecret: sessionSecret,
-    );
-    if (profile != null && profile.userDisplayId.isNotEmpty) {
-      await PostStorage.saveDisplayName(profile.userDisplayId);
+    try {
+      final sessionId = await DeviceCredentialStore.getSessionId();
+      final sessionSecret = await DeviceCredentialStore.getSessionSecret();
+      if (sessionId == null || sessionSecret == null) return;
+      final profile = await ApiService.getUserProfile(
+        sessionId: sessionId,
+        sessionSecret: sessionSecret,
+      );
+      if (profile != null && profile.userDisplayId.isNotEmpty) {
+        await PostStorage.saveDisplayName(profile.userDisplayId);
+      }
+    } catch (e) {
+      debugPrint('[RegisterPage] 后台同步昵称失败: $e');
     }
   }
 
@@ -522,8 +535,8 @@ class _RegisterPageState extends State<RegisterPage> {
     if (!mounted) return;
     if (ok) {
       _registrationRequestId = null;
-      setState(() => _phase = 'done');
-      Navigator.pop(context);
+      // resumePendingActivation 内部已经广播过账户变化。
+      _finishSuccessfully(notifyDisplayChange: false);
       return;
     }
     setState(() {
@@ -563,8 +576,7 @@ class _RegisterPageState extends State<RegisterPage> {
       }
 
       if (!mounted) return;
-      setState(() => _phase = 'done');
-      Navigator.pop(context);
+      _finishSuccessfully();
     } catch (e) {
       if (mounted) setState(() => _renameError = '网络异常：$e');
     } finally {
@@ -883,7 +895,7 @@ class _RegisterPageState extends State<RegisterPage> {
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => const SmsLoginPage()),
     );
-    if (ok == true && mounted) Navigator.pop(context);
+    if (ok == true && mounted) _finishSuccessfully();
   }
 
   Future<void> _openSmsRegister() async {
@@ -892,7 +904,7 @@ class _RegisterPageState extends State<RegisterPage> {
     );
     if (!mounted) return;
     if (ok == true) {
-      Navigator.pop(context);
+      _finishSuccessfully();
       return;
     }
     // 子页中建号成功后用户可能在激活失败状态直接返回；父页接管恢复，

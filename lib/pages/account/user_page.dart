@@ -58,6 +58,9 @@ class _UserPageState extends State<UserPage> {
 
   void _onAccountDisplayChanged() {
     if (!mounted) return;
+    // registered 由同步 Hive 状态读取；先立即重建，避免等后续异步资料
+    // 请求完成后才从“未注册”切换到“已注册”。
+    setState(() {});
     _reloadAccountUi();
     _prefetchFuture = BindingCache.prefetchAll();
   }

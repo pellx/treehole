@@ -696,8 +696,14 @@ class _PostCardState extends State<PostCard> {
                             if (!PostStorage.isRegistered())
                               Positioned.fill(
                                 child: GestureDetector(
-                                  onTap: () {
-                                    Navigator.of(context).push(bottomUpRoute(const RegisterPage()));
+                                  onTap: () async {
+                                    final registered = await Navigator.of(context)
+                                        .push<bool>(bottomUpRoute<bool>(
+                                      const RegisterPage(),
+                                    ));
+                                    if (registered == true && mounted) {
+                                      setState(() {});
+                                    }
                                   },
                                   child: Container(
                                     decoration: BoxDecoration(
