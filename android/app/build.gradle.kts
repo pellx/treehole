@@ -21,7 +21,10 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
+        // Reserve an ABI range per build: Flutter adds 1000/2000/3000
+        // for split APKs. Every future universal APK must exceed older splits.
+        require(flutter.versionCode in 1..210000) { "Android build number out of range" }
+        versionCode = flutter.versionCode * 10000
         versionName = flutter.versionName
     }
 

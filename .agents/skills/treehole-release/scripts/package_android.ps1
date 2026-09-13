@@ -1,5 +1,5 @@
 param([Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
-      [Parameter(Mandatory)][ValidateRange(1,2100000000)][int]$ExpectedBuild,
+      [Parameter(Mandatory)][ValidateRange(1,210000)][int]$ExpectedBuild,
       [string]$Sdk = 'C:\androidSDK', [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../../../..')).Path
@@ -28,7 +28,9 @@ try {
         $cert = & $signer verify --print-certs $file.FullName
         if ($LASTEXITCODE -ne 0 -or ($cert -join "`n") -notmatch 'SHA-256 digest: 01360b21890ca7191fabf6ab6ddf74e122568b4d7d5ab07287011baf4027da95') { throw "Signature mismatch: $($file.Name)" }
         $metadata = & $aapt dump badging $file.FullName
-        if ($LASTEXITCODE -ne 0 -or ($metadata -join "`n") -notmatch "package: name='com.example.treehole' versionCode='$ExpectedBuild' versionName='$([regex]::Escape($Version))'") { throw "APK metadata mismatch: $($file.Name)" }
+        $offset = if ($file.Name -match '-armeabi-v7a.apk$') { 1000 } elseif ($file.Name -match '-arm64-v8a.apk$') { 2000 } elseif ($file.Name -match '-x86_64.apk$') { 3000 } else { 0 }
+        $androidCode = $ExpectedBuild * 10000 + $offset
+        if ($LASTEXITCODE -ne 0 -or ($metadata -join "`n") -notmatch "package: name='com.example.treehole' versionCode='$androidCode' versionName='$([regex]::Escape($Version))'") { throw "APK metadata mismatch: $($file.Name)" }
         $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         "$hash  $($file.Name)"
     }

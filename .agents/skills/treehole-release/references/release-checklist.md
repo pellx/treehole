@@ -6,7 +6,7 @@
 - APK 根目录 `/var/www/img/flutter_app_version`，公网 `https://www.leisure.xin:33433/flutter_app_version/`。
 - v<version>/treehole-v<version>-<arm64-v8a|armeabi-v7a|x86_64|all>.apk。禁止 `.apk.apk`，每个链接必须有文件。未知网页架构应保留选择页或通用包，不把 WebAssembly 支持当作 arm64 证据。
 - 应用 ID com.example.treehole，iOS bundle com.pellx.treehole。Android 沿用证书 SHA256 `01360b21890ca7191fabf6ab6ddf74e122568b4d7d5ab07287011baf4027da95`；未授权迁移时禁止换包名或签名。
-- pubspec 与 VersionInfo.currentVersion 必须一致。Android build code 全局递增；检查历史线上 APK，不仅检查营销版本。iOS 上传前检查版本/构建号未被使用。
+- pubspec 与 VersionInfo.currentVersion 必须一致。Android versionCode=pubspec build*10000+ABI偏移（通用0、armeabi1000、arm642000、x86_643000）；1.1.2+4 为40000/41000/42000/43000。build必须全局递增，以便新版通用包也能覆盖旧分架构包。iOS build仍为4；上传前检查版本/构建号未被使用。
 - 使用 gh 登录并检查 repo、secrets 名称、workflow；不得输出 secret 或带凭据 remote。后端旧泄露 PAT 撤销后改为专用可写 Deploy Key，未撤销前不得使用其推送。
 - Flutter analyze/test 和后端 tsc 必须通过。无后端测试时明确记录缺少测试，不能冒称通过覆盖。
 - 真机检查：1.1.1 覆盖安装保留账户；注册最后一步返回原页面并刷新账号；断网恢复只产生一个账号。没有设备时报告未验收，不自行跳过上线门槛。
