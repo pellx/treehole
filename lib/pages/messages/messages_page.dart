@@ -59,7 +59,7 @@ class _MessagesPageState extends State<MessagesPage>
 
   void _scheduleReload() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.active) _load(reset: true);
+      if (mounted && widget.active) _load(reset: true, silent: true);
     });
   }
 
@@ -102,7 +102,7 @@ class _MessagesPageState extends State<MessagesPage>
             duration: const Duration(seconds: 25),
           );
     try {
-      if (reset && !silent) {
+      if (reset && (!silent || _api == null)) {
         _api?.close();
         _api = null;
         final local = await DmApi.openLocal();
