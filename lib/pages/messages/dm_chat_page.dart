@@ -211,13 +211,6 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
   Future<void> _load({bool older = false, bool silent = false}) async {
     if (_busy || _sending) return;
     setState(() => _busy = true);
-    final dismiss = silent
-        ? () {}
-        : showAppToast(
-            context,
-            message: '正在获取私信',
-            duration: const Duration(seconds: 25),
-          );
     try {
       if (!_loaded) {
         try {
@@ -265,7 +258,6 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
       });
       WidgetsBinding.instance.addPostFrameCallback((_) => _markVisibleRead());
     } catch (error) {
-      dismiss();
       if (mounted && error is DmException && error.requiresLogin) {
         setState(() {
           _messages.clear();
@@ -275,7 +267,6 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
       }
       if (mounted && !silent) showAppToast(context, message: error.toString());
     } finally {
-      dismiss();
       if (mounted) setState(() => _busy = false);
       _drainRefresh();
     }
