@@ -16,6 +16,17 @@ void main() {
       expect(find.text('消息'), findsOneWidget);
       expect(find.byTooltip('一键清理未读'), findsOneWidget);
       expect(find.byTooltip('更多消息操作'), findsOneWidget);
+      // Disabled IconButtons use a dim color; both must stay enabled even before session hydration.
+      for (final tooltip in ['一键清理未读', '更多消息操作']) {
+        final button = tester.widget<IconButton>(
+          find.ancestor(
+            of: find.byTooltip(tooltip),
+            matching: find.byType(IconButton),
+          ),
+        );
+        expect(button.onPressed, isNotNull);
+      }
+
       expect(find.byIcon(Icons.arrow_back), findsNothing);
       expect(find.byIcon(Icons.arrow_back_ios), findsNothing);
       await tester.tap(find.byTooltip('更多消息操作'));

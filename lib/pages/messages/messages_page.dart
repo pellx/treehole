@@ -309,14 +309,12 @@ class _MessagesPageState extends State<MessagesPage>
         children: [
           IconButton(
             tooltip: '一键清理未读',
-            onPressed: _busy || _api == null || _userId == null
-                ? null
-                : _clearUnread,
+            onPressed: _clearUnread,
             icon: const Icon(Icons.done_all),
           ),
           IconButton(
             tooltip: '更多消息操作',
-            onPressed: _busy ? null : _showActions,
+            onPressed: _showActions,
             icon: const Icon(Icons.more_horiz),
           ),
         ],
