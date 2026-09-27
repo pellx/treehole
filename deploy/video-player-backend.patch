@@ -1,0 +1,1022 @@
+diff --git a/VIDEO_DEPLOY.md b/VIDEO_DEPLOY.md
+new file mode 100644
+index 0000000..fc4ec19
+--- /dev/null
++++ b/VIDEO_DEPLOY.md
+@@ -0,0 +1,33 @@
++# Video module deployment
++
++Apply the migration and environment configuration before starting the updated service.
++
++## Prerequisites
++
++- MySQL migration: run `database/migrations/20260923_create_videos.sql` once against the configured database.
++- Redis and `ffmpeg` / `ffprobe` must be available to the NestJS process.
++- Configure `VIDEO_ADMIN_TOKEN` to a random value of at least 32 characters. Keep it out of Git.
++- The defaults are `VIDEO_MEDIA_ROOT=/var/www/img` and `VIDEO_PUBLIC_BASE=https://www.leisure.xin:33433`.
++- Ensure the NestJS process can write `/var/www/img/video-hls`; OpenResty must serve that directory over HTTPS. Existing MIME rules already cover `.m3u8` and `.ts`.
++
++## Register existing media
++
++Use the admin token in the `x-video-admin-token` header:
++
++```http
++POST https://tree.leisure.xin/node/videos/admin/register
++Content-Type: application/json
++x-video-admin-token: <configured token>
++
++{
++  "title": "Example video",
++  "source_path": "teacher-day.mp4",
++  "cover_path": "2.jpg"
++}
++```
++
++Paths may be relative to `VIDEO_MEDIA_ROOT` or absolute beneath it. Registration returns an ID and `pending` status. Poll `GET /node/videos/admin/:id/status` with the same header; a failed job can be resubmitted with `POST /node/videos/admin/:id/retry`. Only `ready` records appear in the public list.
++
++Public endpoints are `GET /node/videos`, `GET /node/videos/:id`, and `GET /node/videos/:id/danmaku?from_ms=0&to_ms=60000`. Posting a danmaku uses `POST /node/videos/:id/danmaku` with `x-session-id` and `x-session-secret` headers and a JSON body containing `time_ms` and `text`.
++
++Start with a short existing file to verify HLS playback and media permissions before registering the multi-gigabyte movie. The worker processes one video at a time and publishes the output only after both HLS renditions complete.
+diff --git a/database/migrations/20260923_create_videos.sql b/database/migrations/20260923_create_videos.sql
+new file mode 100644
+index 0000000..6cfe8e2
+--- /dev/null
++++ b/database/migrations/20260923_create_videos.sql
+@@ -0,0 +1,24 @@
++CREATE TABLE videos (
++  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
++  title VARCHAR(200) NOT NULL,
++  source_path VARCHAR(500) NOT NULL,
++  cover_path VARCHAR(500) NOT NULL,
++  status VARCHAR(20) NOT NULL DEFAULT 'pending',
++  duration_ms INT NULL,
++  error_message VARCHAR(500) NULL,
++  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
++  INDEX idx_videos_status_created (status, created_at)
++);
++
++CREATE TABLE video_danmaku (
++  id INT NOT NULL AUTO_INCREMENT PRIMARY KEY,
++  video_id INT NOT NULL,
++  user_id INT NOT NULL,
++  time_ms INT NOT NULL,
++  text VARCHAR(100) NOT NULL,
++  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
++  INDEX idx_video_danmaku_time (video_id, time_ms),
++  CONSTRAINT fk_video_danmaku_video FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
++  CONSTRAINT fk_video_danmaku_user FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
++);
+diff --git a/package-lock.json b/package-lock.json
+index 7df6d2f..6d2facf 100755
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -13,6 +13,7 @@
+         "@alicloud/dypnsapi20170525": "^2.0.0",
+         "@alicloud/green20220302": "^3.3.0",
+         "@elastic/elasticsearch": "^9.2.0",
++        "@nestjs/bullmq": "11.0.5",
+         "@nestjs/common": "^11.0.1",
+         "@nestjs/config": "^4.0.2",
+         "@nestjs/core": "^11.0.1",
+@@ -23,6 +24,7 @@
+         "@nestjs/typeorm": "^11.0.0",
+         "@nestjs/websockets": "^11.1.28",
+         "bcrypt": "^6.0.0",
++        "bullmq": "6.3.8",
+         "class-transformer": "^0.5.1",
+         "class-validator": "^0.14.4",
+         "image-size": "^2.0.2",
+@@ -2296,6 +2298,84 @@
+         "node": ">=8"
+       }
+     },
++    "node_modules/@msgpackr-extract/msgpackr-extract-darwin-arm64": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-arm64/-/msgpackr-extract-darwin-arm64-3.0.4.tgz",
++      "integrity": "sha512-LCkGo6JDfaBhgST7UpPWgNgLINpcpabaHfyz5OBx75nUYxBsaEPxjnyNjWpeb/xBup/682QnBfRBy2/LvPutZQ==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-darwin-x64": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-darwin-x64/-/msgpackr-extract-darwin-x64-3.0.4.tgz",
++      "integrity": "sha512-zExlW9zUJKZH/tOtVMttwjKa4Xm/3KcNjnE3dPN92uCktwavMxpgCA3MoJK/DOnTWsQgo224OaST27/mPNAf+w==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "darwin"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-linux-arm": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm/-/msgpackr-extract-linux-arm-3.0.4.tgz",
++      "integrity": "sha512-Tg3yX65f5GbtXLkrYEHE5oibZG9epyYWas7FogTTEJeDEF9JlXJzKgXaNhT3UXlTOeA+AfZpYZYZ0uPj7Cfquw==",
++      "cpu": [
++        "arm"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-linux-arm64": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-arm64/-/msgpackr-extract-linux-arm64-3.0.4.tgz",
++      "integrity": "sha512-dgX0P/9wGPJeHFBG+ZmhgE6bmtMt7NP5CRBGyyktpopdk/mW4POnrpQsSLtKI1dwpc+pPLuXHDh6vvskyQE/sw==",
++      "cpu": [
++        "arm64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-linux-x64": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-linux-x64/-/msgpackr-extract-linux-x64-3.0.4.tgz",
++      "integrity": "sha512-8TNXMEjJc3QEy7R/x1INhgiU+XakDAFUzBhaz7+Rbrs8NH5UQeHQxxmzsSBJGyV6I1jW79undiQm8tOI+D+8FQ==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "linux"
++      ]
++    },
++    "node_modules/@msgpackr-extract/msgpackr-extract-win32-x64": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/@msgpackr-extract/msgpackr-extract-win32-x64/-/msgpackr-extract-win32-x64-3.0.4.tgz",
++      "integrity": "sha512-CmCXPQrkbwExx3j946/PtHWHbYJiCRBRDl4BlkRQcJB/YOwQxJRTpoo7aTsortjgoJ1x7opzTSxn7C+ASSLVjQ==",
++      "cpu": [
++        "x64"
++      ],
++      "license": "MIT",
++      "optional": true,
++      "os": [
++        "win32"
++      ]
++    },
+     "node_modules/@napi-rs/wasm-runtime": {
+       "version": "0.2.12",
+       "resolved": "https://registry.npmjs.org/@napi-rs/wasm-runtime/-/wasm-runtime-0.2.12.tgz",
+@@ -2309,6 +2389,34 @@
+         "@tybys/wasm-util": "^0.10.0"
+       }
+     },
++    "node_modules/@nestjs/bull-shared": {
++      "version": "11.0.5",
++      "resolved": "https://registry.npmjs.org/@nestjs/bull-shared/-/bull-shared-11.0.5.tgz",
++      "integrity": "sha512-QI7GHPk4oePBwszAZn/Kz5hgB79KijB1RDoo+E/BrSt33sHUrvRZXVyO0+knZleyloRYy0LT2VwsqSP/aQvg4Q==",
++      "license": "MIT",
++      "dependencies": {
++        "tslib": "2.8.1"
++      },
++      "peerDependencies": {
++        "@nestjs/common": "^10.0.0 || ^11.0.0",
++        "@nestjs/core": "^10.0.0 || ^11.0.0"
++      }
++    },
++    "node_modules/@nestjs/bullmq": {
++      "version": "11.0.5",
++      "resolved": "https://registry.npmjs.org/@nestjs/bullmq/-/bullmq-11.0.5.tgz",
++      "integrity": "sha512-u0VGVc5aER8A+4jEYXDin2rtqIHR8sFL68RUgNDgZslvjdeb1QL4CF+Sr0v4zMXJEfaLSVD606Oq0cryNNCxHg==",
++      "license": "MIT",
++      "dependencies": {
++        "@nestjs/bull-shared": "^11.0.5",
++        "tslib": "2.8.1"
++      },
++      "peerDependencies": {
++        "@nestjs/common": "^10.0.0 || ^11.0.0",
++        "@nestjs/core": "^10.0.0 || ^11.0.0",
++        "bullmq": "^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0"
++      }
++    },
+     "node_modules/@nestjs/cli": {
+       "version": "11.0.16",
+       "resolved": "https://registry.npmjs.org/@nestjs/cli/-/cli-11.0.16.tgz",
+@@ -4573,6 +4681,42 @@
+       "integrity": "sha512-E+XQCRwSbaaiChtv6k6Dwgc+bx+Bs6vuKJHHl5kox/BaKbhiXzqQOwK4cO22yElGp2OCmjwVhT3HmxgyPGnJfQ==",
+       "license": "MIT"
+     },
++    "node_modules/bullmq": {
++      "version": "6.3.8",
++      "resolved": "https://registry.npmjs.org/bullmq/-/bullmq-6.3.8.tgz",
++      "integrity": "sha512-09zcOQ1uycyCK2C9iY2Pm+/JPa/gIXiZqGBUiIlO1v3VshwBgarmAgWRTWDL/IAvI8NFE1zqrkdKFgRfXHHM5A==",
++      "license": "MIT",
++      "dependencies": {
++        "cron-parser": "5.10.1",
++        "msgpackr": "2.1.0",
++        "node-abort-controller": "3.1.1",
++        "semver": "7.8.5",
++        "tslib": "2.8.1"
++      },
++      "engines": {
++        "node": ">=14.17.0"
++      },
++      "peerDependencies": {
++        "bullmq-otel": ">=2.0.0",
++        "ioredis": ">=5.0.0",
++        "pg": ">=8.0.0",
++        "redis": ">=5.0.0"
++      },
++      "peerDependenciesMeta": {
++        "bullmq-otel": {
++          "optional": true
++        },
++        "ioredis": {
++          "optional": true
++        },
++        "pg": {
++          "optional": true
++        },
++        "redis": {
++          "optional": true
++        }
++      }
++    },
+     "node_modules/busboy": {
+       "version": "1.6.0",
+       "resolved": "https://registry.npmjs.org/busboy/-/busboy-1.6.0.tgz",
+@@ -5162,6 +5306,18 @@
+       "devOptional": true,
+       "license": "MIT"
+     },
++    "node_modules/cron-parser": {
++      "version": "5.10.1",
++      "resolved": "https://registry.npmjs.org/cron-parser/-/cron-parser-5.10.1.tgz",
++      "integrity": "sha512-pKRrRagItwk9rGIStcUyMxFX34x56zoX3KDf9HJ4ttwkXIK1qxK63EvXvEDmlxI9AdPJ+Y7TEKRftRlW5eSS7A==",
++      "license": "MIT",
++      "dependencies": {
++        "luxon": "^3.7.2"
++      },
++      "engines": {
++        "node": ">=18"
++      }
++    },
+     "node_modules/cross-spawn": {
+       "version": "7.0.6",
+       "resolved": "https://registry.npmjs.org/cross-spawn/-/cross-spawn-7.0.6.tgz",
+@@ -5288,6 +5444,16 @@
+         "node": ">= 0.8"
+       }
+     },
++    "node_modules/detect-libc": {
++      "version": "2.1.2",
++      "resolved": "https://registry.npmjs.org/detect-libc/-/detect-libc-2.1.2.tgz",
++      "integrity": "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==",
++      "license": "Apache-2.0",
++      "optional": true,
++      "engines": {
++        "node": ">=8"
++      }
++    },
+     "node_modules/detect-newline": {
+       "version": "3.1.0",
+       "resolved": "https://registry.npmjs.org/detect-newline/-/detect-newline-3.1.0.tgz",
+@@ -8093,6 +8259,15 @@
+         "url": "https://github.com/sponsors/wellwelwel"
+       }
+     },
++    "node_modules/luxon": {
++      "version": "3.7.2",
++      "resolved": "https://registry.npmjs.org/luxon/-/luxon-3.7.2.tgz",
++      "integrity": "sha512-vtEhXh/gNjI9Yg1u4jX/0YVPMvxzHuGgCm6tC5kZyb08yjGWGnqAjGJvcXbqQR2P3MyMEFnRbpcdFS6PBcLqew==",
++      "license": "MIT",
++      "engines": {
++        "node": ">=12"
++      }
++    },
+     "node_modules/magic-string": {
+       "version": "0.30.17",
+       "resolved": "https://registry.npmjs.org/magic-string/-/magic-string-0.30.17.tgz",
+@@ -8330,6 +8505,37 @@
+       "integrity": "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==",
+       "license": "MIT"
+     },
++    "node_modules/msgpackr": {
++      "version": "2.1.0",
++      "resolved": "https://registry.npmjs.org/msgpackr/-/msgpackr-2.1.0.tgz",
++      "integrity": "sha512-p/pBCVO63CsvvpkomUnNNag6+n38rULuDA6HHe70o2gtC8ODI52foF/4ko2qQcp6OiErJXTmrZeXmsGGHsIQNQ==",
++      "license": "MIT",
++      "optionalDependencies": {
++        "msgpackr-extract": "^3.0.4"
++      }
++    },
++    "node_modules/msgpackr-extract": {
++      "version": "3.0.4",
++      "resolved": "https://registry.npmjs.org/msgpackr-extract/-/msgpackr-extract-3.0.4.tgz",
++      "integrity": "sha512-4kmO/MdyUIkLIvTPr8VHLil4AtoKIoniWPIEk5+CDy0xnWC84azhSFmuJ7PxZdsYtiP5kEeQsORAVIeMgxT+Hw==",
++      "hasInstallScript": true,
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "node-gyp-build-optional-packages": "5.2.2"
++      },
++      "bin": {
++        "download-msgpackr-prebuilds": "bin/download-prebuilds.js"
++      },
++      "optionalDependencies": {
++        "@msgpackr-extract/msgpackr-extract-darwin-arm64": "3.0.4",
++        "@msgpackr-extract/msgpackr-extract-darwin-x64": "3.0.4",
++        "@msgpackr-extract/msgpackr-extract-linux-arm": "3.0.4",
++        "@msgpackr-extract/msgpackr-extract-linux-arm64": "3.0.4",
++        "@msgpackr-extract/msgpackr-extract-linux-x64": "3.0.4",
++        "@msgpackr-extract/msgpackr-extract-win32-x64": "3.0.4"
++      }
++    },
+     "node_modules/multer": {
+       "version": "2.1.1",
+       "resolved": "https://registry.npmjs.org/multer/-/multer-2.1.1.tgz",
+@@ -8477,7 +8683,6 @@
+       "version": "3.1.1",
+       "resolved": "https://registry.npmjs.org/node-abort-controller/-/node-abort-controller-3.1.1.tgz",
+       "integrity": "sha512-AGK2yQKIjRuqnc6VkX2Xj5d+QW8xZ87pa1UK6yA6ouUyuxfHuMP6umE5QK7UmTeOAymo+Zx1Fxiuw9rVx8taHQ==",
+-      "dev": true,
+       "license": "MIT"
+     },
+     "node_modules/node-addon-api": {
+@@ -8510,6 +8715,21 @@
+         "node-gyp-build-test": "build-test.js"
+       }
+     },
++    "node_modules/node-gyp-build-optional-packages": {
++      "version": "5.2.2",
++      "resolved": "https://registry.npmjs.org/node-gyp-build-optional-packages/-/node-gyp-build-optional-packages-5.2.2.tgz",
++      "integrity": "sha512-s+w+rBWnpTMwSFbaE0UXsRlg7hU4FjekKU4eyAih5T8nJuNZT1nNsskXpxmeqSK9UzkBl6UgRlnKc8hz8IEqOw==",
++      "license": "MIT",
++      "optional": true,
++      "dependencies": {
++        "detect-libc": "^2.0.1"
++      },
++      "bin": {
++        "node-gyp-build-optional-packages": "bin.js",
++        "node-gyp-build-optional-packages-optional": "optional.js",
++        "node-gyp-build-optional-packages-test": "build-test.js"
++      }
++    },
+     "node_modules/node-int64": {
+       "version": "0.4.0",
+       "resolved": "https://registry.npmjs.org/node-int64/-/node-int64-0.4.0.tgz",
+@@ -9316,10 +9536,9 @@
+       "license": "BSD-3-Clause"
+     },
+     "node_modules/semver": {
+-      "version": "7.7.3",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-7.7.3.tgz",
+-      "integrity": "sha512-SdsKMrI9TdgjdweUSR9MweHA4EJ8YxHn8DFaDisvhVlUOe4BF1tLD7GAj0lIqWVl+dPb/rExr0Btby5loQm20Q==",
+-      "dev": true,
++      "version": "7.8.5",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
++      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
+       "license": "ISC",
+       "bin": {
+         "semver": "bin/semver.js"
+diff --git a/package.json b/package.json
+index aaa75a4..a33869f 100755
+--- a/package.json
++++ b/package.json
+@@ -24,6 +24,7 @@
+     "@alicloud/dypnsapi20170525": "^2.0.0",
+     "@alicloud/green20220302": "^3.3.0",
+     "@elastic/elasticsearch": "^9.2.0",
++    "@nestjs/bullmq": "11.0.5",
+     "@nestjs/common": "^11.0.1",
+     "@nestjs/config": "^4.0.2",
+     "@nestjs/core": "^11.0.1",
+@@ -34,6 +35,7 @@
+     "@nestjs/typeorm": "^11.0.0",
+     "@nestjs/websockets": "^11.1.28",
+     "bcrypt": "^6.0.0",
++    "bullmq": "6.3.8",
+     "class-transformer": "^0.5.1",
+     "class-validator": "^0.14.4",
+     "image-size": "^2.0.2",
+diff --git a/scripts/apply-video-migration.cjs b/scripts/apply-video-migration.cjs
+new file mode 100644
+index 0000000..847fc4b
+--- /dev/null
++++ b/scripts/apply-video-migration.cjs
+@@ -0,0 +1,41 @@
++const fs = require('node:fs/promises');
++const path = require('node:path');
++const mysql = require('mysql2/promise');
++
++async function main() {
++  const connection = await mysql.createConnection({
++    host: process.env.DB_HOST,
++    port: Number(process.env.DB_PORT) || 3306,
++    user: process.env.DB_USERNAME,
++    password: process.env.DB_PASSWORD,
++    database: process.env.DB_NAME,
++    multipleStatements: true,
++  });
++
++  try {
++    const [rows] = await connection.query(
++      "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('videos', 'video_danmaku')",
++    );
++    if (rows.length === 2) {
++      console.log('Video tables already exist; migration skipped.');
++      return;
++    }
++    if (rows.length !== 0) {
++      throw new Error('Only one video table exists. Inspect the database before retrying.');
++    }
++
++    const sql = await fs.readFile(
++      path.join(__dirname, '..', 'database', 'migrations', '20260923_create_videos.sql'),
++      'utf8',
++    );
++    await connection.query(sql);
++    console.log('Video migration applied.');
++  } finally {
++    await connection.end();
++  }
++}
++
++main().catch((error) => {
++  console.error('Video migration failed:', error.message);
++  process.exitCode = 1;
++});
+diff --git a/src/app.module.ts b/src/app.module.ts
+index 0886ad1..5a8ca61 100755
+--- a/src/app.module.ts
++++ b/src/app.module.ts
+@@ -11,6 +11,7 @@ import { ModerationModule } from './moderation/moderation.module';
+ import { FileProcessorModule } from './file-processor/file-processor.module';
+ import { VersionsModule } from './versions/versions.module';
+ import { RealtimeModule } from './realtime/realtime.module';
++import { VideosModule } from './videos/videos.module';
+ 
+ @Module({
+ 	imports: [
+@@ -35,6 +36,7 @@ import { RealtimeModule } from './realtime/realtime.module';
+ 		ModerationModule,
+ 		VersionsModule,
+ 		RealtimeModule,
++		VideosModule,
+ 	],
+ 
+ 	controllers: [AppController],
+diff --git a/src/videos/dto/create-danmaku.dto.ts b/src/videos/dto/create-danmaku.dto.ts
+new file mode 100644
+index 0000000..cef8627
+--- /dev/null
++++ b/src/videos/dto/create-danmaku.dto.ts
+@@ -0,0 +1,12 @@
++import { IsInt, IsString, Length, Max, Min } from 'class-validator';
++
++export class CreateDanmakuDto {
++  @IsInt()
++  @Min(0)
++  @Max(86400000)
++  time_ms: number;
++
++  @IsString()
++  @Length(1, 100)
++  text: string;
++}
+diff --git a/src/videos/dto/create-video.dto.ts b/src/videos/dto/create-video.dto.ts
+new file mode 100644
+index 0000000..ed607c6
+--- /dev/null
++++ b/src/videos/dto/create-video.dto.ts
+@@ -0,0 +1,15 @@
++import { IsString, Length, Matches } from 'class-validator';
++
++export class CreateVideoDto {
++  @IsString()
++  @Length(1, 200)
++  title: string;
++
++  @IsString()
++  @Matches(/^\/?(?:[\w.-]+\/)*[\w.-]+\.(?:mp4|mov|m4v)$/i)
++  source_path: string;
++
++  @IsString()
++  @Matches(/^\/?(?:[\w.-]+\/)*[\w.-]+\.(?:jpg|jpeg|png|webp)$/i)
++  cover_path: string;
++}
+diff --git a/src/videos/entities/danmaku.entity.ts b/src/videos/entities/danmaku.entity.ts
+new file mode 100644
+index 0000000..02533c5
+--- /dev/null
++++ b/src/videos/entities/danmaku.entity.ts
+@@ -0,0 +1,23 @@
++import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
++
++@Entity('video_danmaku')
++@Index('idx_video_danmaku_time', ['video_id', 'time_ms'])
++export class DanmakuEntity {
++  @PrimaryGeneratedColumn()
++  id: number;
++
++  @Column({ type: 'int' })
++  video_id: number;
++
++  @Column({ type: 'int' })
++  user_id: number;
++
++  @Column({ type: 'int' })
++  time_ms: number;
++
++  @Column({ type: 'varchar', length: 100 })
++  text: string;
++
++  @CreateDateColumn()
++  created_at: Date;
++}
+diff --git a/src/videos/entities/video.entity.ts b/src/videos/entities/video.entity.ts
+new file mode 100644
+index 0000000..c71625f
+--- /dev/null
++++ b/src/videos/entities/video.entity.ts
+@@ -0,0 +1,34 @@
++import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
++
++export type VideoStatus = 'pending' | 'processing' | 'ready' | 'failed';
++
++@Entity('videos')
++export class VideoEntity {
++  @PrimaryGeneratedColumn()
++  id: number;
++
++  @Column({ type: 'varchar', length: 200 })
++  title: string;
++
++  @Column({ type: 'varchar', length: 500 })
++  source_path: string;
++
++  @Column({ type: 'varchar', length: 500 })
++  cover_path: string;
++
++  @Index('idx_videos_status_created')
++  @Column({ type: 'varchar', length: 20, default: 'pending' })
++  status: VideoStatus;
++
++  @Column({ type: 'int', nullable: true })
++  duration_ms: number | null;
++
++  @Column({ type: 'varchar', length: 500, nullable: true })
++  error_message: string | null;
++
++  @CreateDateColumn()
++  created_at: Date;
++
++  @UpdateDateColumn()
++  updated_at: Date;
++}
+diff --git a/src/videos/video-admin.guard.ts b/src/videos/video-admin.guard.ts
+new file mode 100644
+index 0000000..a76cfcf
+--- /dev/null
++++ b/src/videos/video-admin.guard.ts
+@@ -0,0 +1,20 @@
++import { CanActivate, ExecutionContext, Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
++import { timingSafeEqual } from 'node:crypto';
++
++@Injectable()
++export class VideoAdminGuard implements CanActivate {
++  canActivate(context: ExecutionContext): boolean {
++    const expected = process.env.VIDEO_ADMIN_TOKEN;
++    if (!expected || expected.length < 32) {
++      throw new ServiceUnavailableException('VIDEO_ADMIN_TOKEN_NOT_CONFIGURED');
++    }
++    const supplied = context.switchToHttp().getRequest().headers['x-video-admin-token'];
++    if (typeof supplied !== 'string') throw new UnauthorizedException();
++    const a = Buffer.from(supplied);
++    const b = Buffer.from(expected);
++    if (a.length !== b.length || !timingSafeEqual(a, b)) {
++      throw new UnauthorizedException();
++    }
++    return true;
++  }
++}
+diff --git a/src/videos/video-transcode.worker.ts b/src/videos/video-transcode.worker.ts
+new file mode 100644
+index 0000000..a36faa4
+--- /dev/null
++++ b/src/videos/video-transcode.worker.ts
+@@ -0,0 +1,94 @@
++import { Processor, WorkerHost } from '@nestjs/bullmq';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Job } from 'bullmq';
++import { spawn } from 'node:child_process';
++import { mkdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
++import { relative, resolve, sep } from 'node:path';
++import { Repository } from 'typeorm';
++import { VideoEntity } from './entities/video.entity';
++
++@Processor('video-transcode', { concurrency: 1 })
++export class VideoTranscodeWorker extends WorkerHost {
++  private readonly mediaRoot = resolve(process.env.VIDEO_MEDIA_ROOT || '/var/www/img');
++
++  constructor(@InjectRepository(VideoEntity) private readonly videos: Repository<VideoEntity>) {
++    super();
++  }
++
++  private run(binary: string, args: string[]): Promise<string> {
++    return new Promise((resolveOutput, reject) => {
++      const child = spawn(binary, args, { shell: false });
++      let output = '';
++      let error = '';
++      child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString(); });
++      child.stderr.on('data', (chunk: Buffer) => { error = (error + chunk.toString()).slice(-4000); });
++      child.on('error', reject);
++      child.on('close', (code) => code === 0
++        ? resolveOutput(output)
++        : reject(new Error(binary + ' exited ' + code + ': ' + error)));
++    });
++  }
++
++  async process(job: Job<{ videoId: number }>): Promise<void> {
++    const video = await this.videos.findOneBy({ id: job.data.videoId });
++    if (!video || video.status === 'ready') return;
++    const base = resolve(this.mediaRoot, 'video-hls');
++    const temporary = resolve(base, '.tmp-' + video.id);
++    const finished = resolve(base, String(video.id));
++    await this.videos.update(video.id, { status: 'processing', error_message: null });
++    await mkdir(base, { recursive: true });
++    await rm(temporary, { recursive: true, force: true });
++    try {
++      const root = await realpath(this.mediaRoot);
++      const source = await realpath(resolve(root, video.source_path));
++      const sourceRelative = relative(root, source);
++      if (!sourceRelative || sourceRelative === '..' || sourceRelative.startsWith('..' + sep)) {
++        throw new Error('MEDIA_PATH_OUTSIDE_ROOT');
++      }
++      const probe = await this.run('ffprobe', [
++        '-v', 'error', '-show_entries', 'format=duration', '-of', 'json', source,
++      ]);
++      const duration = Number(JSON.parse(probe).format?.duration);
++      if (!Number.isFinite(duration) || duration <= 0) throw new Error('Invalid video duration');
++
++      const renditions = [
++        { label: '360p', height: 360, bitrate: '800k', maxrate: '900k', buffer: '1600k', bandwidth: 1000000 },
++        { label: '720p', height: 720, bitrate: '2500k', maxrate: '2800k', buffer: '5000k', bandwidth: 3000000 },
++      ];
++      const master: string[] = ['#EXTM3U', '#EXT-X-VERSION:3'];
++      for (const rendition of renditions) {
++        const directory = resolve(temporary, rendition.label);
++        await mkdir(directory, { recursive: true });
++        await this.run('ffmpeg', [
++          '-hide_banner', '-loglevel', 'error', '-y', '-i', source,
++          '-map', '0:v:0', '-map', '0:a:0?',
++          '-vf', 'scale=-2:' + rendition.height,
++          '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
++          '-force_key_frames', 'expr:gte(t,n_forced*6)', '-sc_threshold', '0',
++          '-b:v', rendition.bitrate, '-maxrate', rendition.maxrate, '-bufsize', rendition.buffer,
++          '-c:a', 'aac', '-b:a', '128k', '-ac', '2',
++          '-f', 'hls', '-hls_time', '6', '-hls_playlist_type', 'vod',
++          '-hls_flags', 'independent_segments',
++          '-hls_segment_filename', resolve(directory, 'segment_%05d.ts'),
++          resolve(directory, 'playlist.m3u8'),
++        ]);
++        master.push('#EXT-X-STREAM-INF:BANDWIDTH=' + rendition.bandwidth);
++        master.push(rendition.label + '/playlist.m3u8');
++      }
++      await writeFile(resolve(temporary, 'master.m3u8'), master.join('\n') + '\n');
++      await rename(temporary, finished);
++      await this.videos.update(video.id, {
++        status: 'ready',
++        duration_ms: Math.round(duration * 1000),
++        error_message: null,
++      });
++    } catch (error) {
++      await rm(temporary, { recursive: true, force: true });
++      const message = error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500);
++      if (job.attemptsMade + 1 >= (job.opts.attempts || 1)) {
++        await this.videos.update(video.id, { status: 'failed', error_message: message });
++      }
++      throw error;
++    }
++  }
++}
+diff --git a/src/videos/videos.controller.ts b/src/videos/videos.controller.ts
+new file mode 100644
+index 0000000..c8700e3
+--- /dev/null
++++ b/src/videos/videos.controller.ts
+@@ -0,0 +1,59 @@
++import { Body, Controller, Get, Param, ParseIntPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
++import type { Request } from 'express';
++import { SessionGuard } from '../common/guards/session.guard';
++import { CreateVideoDto } from './dto/create-video.dto';
++import { CreateDanmakuDto } from './dto/create-danmaku.dto';
++import { VideoAdminGuard } from './video-admin.guard';
++import { VideosService } from './videos.service';
++
++@Controller('videos')
++export class VideosController {
++  constructor(private readonly videos: VideosService) {}
++
++  @Get()
++  list() {
++    return this.videos.list();
++  }
++
++  @Get(':id')
++  detail(@Param('id', ParseIntPipe) id: number) {
++    return this.videos.detail(id);
++  }
++
++  @Get(':id/danmaku')
++  danmaku(
++    @Param('id', ParseIntPipe) id: number,
++    @Query('from_ms') fromMs: string,
++    @Query('to_ms') toMs: string,
++  ) {
++    return this.videos.danmaku(id, fromMs, toMs);
++  }
++
++  @Post(':id/danmaku')
++  @UseGuards(SessionGuard)
++  sendDanmaku(
++    @Param('id', ParseIntPipe) id: number,
++    @Body() dto: CreateDanmakuDto,
++    @Req() req: Request & { user_id: number },
++  ) {
++    return this.videos.sendDanmaku(id, dto, req.user_id);
++  }
++
++  @Post('admin/register')
++  @UseGuards(VideoAdminGuard)
++  register(@Body() dto: CreateVideoDto) {
++    return this.videos.register(dto);
++  }
++
++  @Post('admin/:id/retry')
++  @UseGuards(VideoAdminGuard)
++  retry(@Param('id', ParseIntPipe) id: number) {
++    return this.videos.retry(id);
++  }
++
++  @Get('admin/:id/status')
++  @UseGuards(VideoAdminGuard)
++  status(@Param('id', ParseIntPipe) id: number) {
++    return this.videos.status(id);
++  }
++}
+diff --git a/src/videos/videos.module.ts b/src/videos/videos.module.ts
+new file mode 100644
+index 0000000..4474329
+--- /dev/null
++++ b/src/videos/videos.module.ts
+@@ -0,0 +1,30 @@
++import { Module } from '@nestjs/common';
++import { BullModule } from '@nestjs/bullmq';
++import { TypeOrmModule } from '@nestjs/typeorm';
++import { UserModule } from '../user/user.module';
++import { RedisModule } from '../redis/redis.module';
++import { VideoEntity } from './entities/video.entity';
++import { DanmakuEntity } from './entities/danmaku.entity';
++import { VideosController } from './videos.controller';
++import { VideosService } from './videos.service';
++import { VideoTranscodeWorker } from './video-transcode.worker';
++import { VideoAdminGuard } from './video-admin.guard';
++
++@Module({
++  imports: [
++    TypeOrmModule.forFeature([VideoEntity, DanmakuEntity]),
++    UserModule,
++    RedisModule,
++    BullModule.forRoot({
++      connection: {
++        host: process.env.REDIS_HOST || '127.0.0.1',
++        port: Number(process.env.REDIS_PORT) || 6379,
++        password: process.env.REDIS_PASSWORD || undefined,
++      },
++    }),
++    BullModule.registerQueue({ name: 'video-transcode' }),
++  ],
++  controllers: [VideosController],
++  providers: [VideosService, VideoTranscodeWorker, VideoAdminGuard],
++})
++export class VideosModule {}
+diff --git a/src/videos/videos.service.ts b/src/videos/videos.service.ts
+new file mode 100644
+index 0000000..242cd61
+--- /dev/null
++++ b/src/videos/videos.service.ts
+@@ -0,0 +1,150 @@
++import { BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
++import { InjectQueue } from '@nestjs/bullmq';
++import { InjectRepository } from '@nestjs/typeorm';
++import { Queue } from 'bullmq';
++import { realpath, stat } from 'node:fs/promises';
++import { resolve, relative, sep } from 'node:path';
++import { Repository } from 'typeorm';
++import { RedisService } from '../redis/redis.service';
++import { CreateVideoDto } from './dto/create-video.dto';
++import { CreateDanmakuDto } from './dto/create-danmaku.dto';
++import { VideoEntity } from './entities/video.entity';
++import { DanmakuEntity } from './entities/danmaku.entity';
++
++@Injectable()
++export class VideosService {
++  private readonly mediaRoot = resolve(process.env.VIDEO_MEDIA_ROOT || '/var/www/img');
++  private readonly publicBase = (process.env.VIDEO_PUBLIC_BASE || 'https://www.leisure.xin:33433').replace(/\/$/, '');
++
++  constructor(
++    @InjectRepository(VideoEntity) private readonly videos: Repository<VideoEntity>,
++    @InjectRepository(DanmakuEntity) private readonly comments: Repository<DanmakuEntity>,
++    @InjectQueue('video-transcode') private readonly queue: Queue,
++    private readonly redis: RedisService,
++  ) {}
++
++  private asset(relativePath: string): string {
++    return this.publicBase + '/' + relativePath.split('/').map(encodeURIComponent).join('/');
++  }
++
++  private output(video: VideoEntity) {
++    const variants = video.duration_ms == null ? [] : [
++      { label: '360p', url: this.asset('video-hls/' + video.id + '/360p/playlist.m3u8') },
++      { label: '720p', url: this.asset('video-hls/' + video.id + '/720p/playlist.m3u8') },
++    ];
++    return {
++      id: video.id,
++      title: video.title,
++      cover_url: this.asset(video.cover_path),
++      duration_ms: video.duration_ms,
++      playback_url: this.asset('video-hls/' + video.id + '/master.m3u8'),
++      qualities: variants,
++    };
++  }
++
++  async list() {
++    const rows = await this.videos.find({
++      where: { status: 'ready' },
++      order: { created_at: 'DESC' },
++      take: 100,
++    });
++    return rows.map((row) => this.output(row));
++  }
++
++  async detail(id: number) {
++    const row = await this.ready(id);
++    return this.output(row);
++  }
++
++  private async ready(id: number) {
++    const row = await this.videos.findOneBy({ id, status: 'ready' });
++    if (!row) throw new NotFoundException('VIDEO_NOT_FOUND');
++    return row;
++  }
++
++  private async checkedFile(input: string): Promise<string> {
++    const root = await realpath(this.mediaRoot);
++    const candidate = input.startsWith(root + sep) ? input : resolve(root, input.replace(/^\//, ''));
++    const absolute = await realpath(candidate).catch(() => {
++      throw new BadRequestException('MEDIA_FILE_NOT_FOUND');
++    });
++    const path = relative(root, absolute);
++    if (!path || path.startsWith('..' + sep) || path === '..' || resolve(root, path) !== absolute) {
++      throw new BadRequestException('MEDIA_PATH_OUTSIDE_ROOT');
++    }
++    if (!(await stat(absolute)).isFile()) throw new BadRequestException('MEDIA_NOT_FILE');
++    return path.split(sep).join('/');
++  }
++
++  async register(dto: CreateVideoDto) {
++    const source = await this.checkedFile(dto.source_path);
++    const cover = await this.checkedFile(dto.cover_path);
++    const video = await this.videos.save(this.videos.create({
++      title: dto.title.trim(),
++      source_path: source,
++      cover_path: cover,
++      status: 'pending',
++    }));
++    await this.queue.add('transcode', { videoId: video.id }, {
++      jobId: 'video-' + video.id,
++      attempts: 2,
++      backoff: { type: 'exponential', delay: 5000 },
++      removeOnComplete: true,
++      removeOnFail: true,
++    });
++    return { id: video.id, status: video.status };
++  }
++
++  async retry(id: number) {
++    const video = await this.videos.findOneBy({ id });
++    if (!video) throw new NotFoundException('VIDEO_NOT_FOUND');
++    if (video.status !== 'failed') throw new BadRequestException('VIDEO_NOT_FAILED');
++    await this.videos.update(id, { status: 'pending', error_message: null });
++    await this.queue.add('transcode', { videoId: id }, {
++      jobId: 'video-' + id,
++      attempts: 2,
++      backoff: { type: 'exponential', delay: 5000 },
++      removeOnComplete: true,
++      removeOnFail: true,
++    });
++    return { id, status: 'pending' };
++  }
++
++  async status(id: number) {
++    const video = await this.videos.findOneBy({ id });
++    if (!video) throw new NotFoundException('VIDEO_NOT_FOUND');
++    return { id, status: video.status, error_message: video.error_message };
++  }
++
++  async danmaku(id: number, fromRaw: string, toRaw: string) {
++    await this.ready(id);
++    const from = Number(fromRaw);
++    const to = Number(toRaw);
++    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) ||
++        from < 0 || to <= from || to - from > 60000) {
++      throw new BadRequestException('INVALID_TIME_RANGE');
++    }
++    return this.comments.createQueryBuilder('d')
++      .select(['d.id', 'd.time_ms', 'd.text'])
++      .where('d.video_id = :id AND d.time_ms >= :from AND d.time_ms < :to', { id, from, to })
++      .orderBy('d.time_ms', 'ASC').addOrderBy('d.id', 'ASC')
++      .limit(500).getMany();
++  }
++
++  async sendDanmaku(id: number, dto: CreateDanmakuDto, userId: number) {
++    const video = await this.ready(id);
++    const text = dto.text.trim();
++    if (!text) throw new BadRequestException('EMPTY_DANMAKU');
++    if (video.duration_ms != null && dto.time_ms > video.duration_ms) {
++      throw new BadRequestException('DANMAKU_TIME_OUT_OF_RANGE');
++    }
++    const key = 'video:danmaku:rate:' + userId;
++    const count = await this.redis.client.incr(key);
++    if (count === 1) await this.redis.client.expire(key, 10);
++    if (count > 3) throw new HttpException('DANMAKU_TOO_FREQUENT', HttpStatus.TOO_MANY_REQUESTS);
++    const row = await this.comments.save(this.comments.create({
++      video_id: id, user_id: userId, time_ms: dto.time_ms, text,
++    }));
++    return { id: row.id, time_ms: row.time_ms, text: row.text };
++  }
++}
+diff --git a/src/videos/videos.spec.ts b/src/videos/videos.spec.ts
+new file mode 100644
+index 0000000..6ea163b
+--- /dev/null
++++ b/src/videos/videos.spec.ts
+@@ -0,0 +1,52 @@
++import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
++import { VideosService } from './videos.service';
++import { VideoAdminGuard } from './video-admin.guard';
++
++describe('video media paths and admin access', () => {
++  let directory: string;
++  let previousRoot: string | undefined;
++
++  beforeEach(async () => {
++    previousRoot = process.env.VIDEO_MEDIA_ROOT;
++    directory = await mkdtemp(join(tmpdir(), 'treehole-video-'));
++    await mkdir(join(directory, 'media'));
++    await writeFile(join(directory, 'media', 'clip.mp4'), 'video');
++    await writeFile(join(directory, 'outside.mp4'), 'outside');
++    process.env.VIDEO_MEDIA_ROOT = join(directory, 'media');
++  });
++
++  afterEach(async () => {
++    if (previousRoot === undefined) delete process.env.VIDEO_MEDIA_ROOT;
++    else process.env.VIDEO_MEDIA_ROOT = previousRoot;
++    await rm(directory, { recursive: true, force: true });
++  });
++
++  it('accepts an existing media file and rejects paths outside the media root', async () => {
++    const service = new VideosService({} as never, {} as never, {} as never, {} as never);
++    await expect((service as any).checkedFile('clip.mp4')).resolves.toBe('clip.mp4');
++    await expect((service as any).checkedFile('../outside.mp4')).rejects.toThrow(
++      'MEDIA_PATH_OUTSIDE_ROOT',
++    );
++  });
++
++  it('requires the configured admin token', () => {
++    const previousToken = process.env.VIDEO_ADMIN_TOKEN;
++    process.env.VIDEO_ADMIN_TOKEN = 'a'.repeat(40);
++    try {
++      const guard = new VideoAdminGuard();
++      const context = (token: string) => ({
++        switchToHttp: () => ({
++          getRequest: () => ({ headers: { 'x-video-admin-token': token } }),
++        }),
++      }) as unknown as ExecutionContext;
++      expect(guard.canActivate(context('a'.repeat(40)))).toBe(true);
++      expect(() => guard.canActivate(context('wrong'))).toThrow(UnauthorizedException);
++    } finally {
++      if (previousToken === undefined) delete process.env.VIDEO_ADMIN_TOKEN;
++      else process.env.VIDEO_ADMIN_TOKEN = previousToken;
++    }
++  });
++});

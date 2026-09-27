@@ -89,3 +89,6 @@ tmp*/
 tmp_*/
 tmp_verification/
 tmp_backend_patch/
+
+# Separate local backend checkout for video work
+.backend-video-work/

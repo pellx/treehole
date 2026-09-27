@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../widgets/app_bottom_nav.dart';
 import '../pages/square/square_page.dart';
-import '../pages/favorites/favorites_page.dart';
+import '../pages/videos/videos_page.dart';
 import '../pages/messages/messages_page.dart';
 import '../pages/account/user_page.dart';
 import '../pages/post/post_create_page.dart';
@@ -20,11 +20,11 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
   final _homeKey = GlobalKey<SquarePageState>();
-  final _favoritesKey = GlobalKey();
+  final _videosKey = GlobalKey();
   final _messagesKey = GlobalKey();
   final _userKey = GlobalKey();
 
-  static const _labels = ['广场', '收藏', '消息', '我的'];
+  static const _labels = ['广场', '视频', '消息', '我的'];
 
   Future<void> _openCreatePost() async {
     HapticFeedback.lightImpact();
@@ -49,7 +49,7 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final pages = [
       SquarePage(key: _homeKey),
-      FavoritesPage(key: _favoritesKey),
+      VideosPage(key: _videosKey),
       MessagesPage(key: _messagesKey),
       UserPage(key: _userKey),
     ];
