@@ -9,7 +9,7 @@ import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_bottom_sheet.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/user_avatar.dart';
-import '../../theme/app_colors.dart';
+import '../../theme/app_messages_theme.dart';
 import '../account/register_page.dart';
 import 'dm_chat_page.dart';
 import 'system_inbox_page.dart';
@@ -302,29 +302,41 @@ class _MessagesPageState extends State<MessagesPage>
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).extension<AppColors>()!;
+    final messagesTheme = AppMessagesTheme.forBrightness(
+      Theme.of(context).brightness,
+    );
     return AppScaffold(
       title: '消息',
       automaticallyImplyLeading: false,
-      leading: IconButton(
-        tooltip: _notificationsEnabled ? '消息通知已开启，打开系统设置' : '开启消息通知',
-        onPressed: _openNotificationSettings,
-        icon: _notificationsEnabled
-            ? Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(
-                    Icons.notifications,
-                    color: colors.common.barText.withValues(alpha: 0.5),
-                  ),
-                  Icon(
-                    Icons.check,
-                    size: 11,
-                    color: colors.common.drawerHeaderBg,
-                  ),
-                ],
-              )
-            : Icon(Icons.notifications_none, color: colors.common.green),
+      leading: Transform.translate(
+        offset: const Offset(
+          AppMessagesTheme.notificationBellOffsetX,
+          AppMessagesTheme.notificationBellOffsetY,
+        ),
+        child: IconButton(
+          tooltip: _notificationsEnabled ? '消息通知已开启，打开系统设置' : '开启消息通知',
+          onPressed: _openNotificationSettings,
+          iconSize: AppMessagesTheme.notificationBellSize,
+          icon: _notificationsEnabled
+              ? Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Icon(
+                      Icons.notifications,
+                      color: messagesTheme.notificationBellOnColor,
+                    ),
+                    Icon(
+                      Icons.check,
+                      size: AppMessagesTheme.notificationCheckSize,
+                      color: messagesTheme.notificationCheckColor,
+                    ),
+                  ],
+                )
+              : Icon(
+                  Icons.notifications_none,
+                  color: messagesTheme.notificationBellOffColor,
+                ),
+        ),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

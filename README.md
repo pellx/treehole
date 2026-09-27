@@ -377,3 +377,9 @@ dart analyze          # 静态分析（CI 必须通过）
 违规历史和账号封禁统一由后端内容安全模块管理。App 图片上传携带会话请求头；审核失败与账号封禁沿用底部小提示。处罚与数据库更名迁移见 [内容安全部署说明](deploy/CONTENT_SAFETY_DEPLOY.md)。本说明替代之前私信三次永久禁发规则。
 
 消息页左侧铃铛直接打开 Android/iOS 系统通知设置，空心/实心对勾状态取自操作系统权限。`app_settings: 7.0.0` 兼容当前 iOS CocoaPods 工程。
+
+铃铛样式在 [lib/theme/app_messages_theme.dart](lib/theme/app_messages_theme.dart) 中统一调整：
+
+- notificationBellOffsetX / notificationBellOffsetY：水平和垂直偏移，正数向右 / 向下，负数向左 / 向上。图标与点击区域一起移动，请保持按钮在顶栏内。
+- light / dark 中的 notificationBellOffColor、notificationBellOnColor、notificationCheckColor：浅色 / 深色主题下未开启、已开启、对勾的颜色。
+- notificationBellSize / notificationCheckSize：铃铛和对勾大小，单位为逻辑像素。
