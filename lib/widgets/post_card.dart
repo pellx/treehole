@@ -1149,14 +1149,14 @@ class _PostCardState extends State<PostCard> {
           onTap: () => _copyComment(comment),
         ),
         AppSheetAction(
-          icon: Icons.report_outlined,
-          label: '举报',
-          onTap: () => _reportContent('comment', comment.id),
-        ),
-        AppSheetAction(
           icon: Icons.star_border,
           label: '收藏',
           onTap: () => showAppToast(context, message: '收藏功能即将上线'),
+        ),
+        AppSheetAction(
+          icon: Icons.report_outlined,
+          label: '举报',
+          onTap: () => _reportContent('comment', comment.id),
         ),
       ],
     );
@@ -1246,6 +1246,15 @@ class _PostCardState extends State<PostCard> {
           },
         ),
         AppSheetAction(
+          icon: Icons.content_copy,
+          label: '复制内容',
+          onTap: () {
+            final text = '${widget.post.title}\n${widget.post.content}';
+            Clipboard.setData(ClipboardData(text: text));
+            showAppToast(context, message: '已复制帖子内容');
+          },
+        ),
+        AppSheetAction(
           icon: Icons.star_border,
           label: '收藏',
           onTap: () => showAppToast(context, message: '收藏功能即将上线'),
@@ -1254,15 +1263,6 @@ class _PostCardState extends State<PostCard> {
           icon: Icons.report_outlined,
           label: '举报',
           onTap: () => _reportContent('post', widget.post.id),
-        ),
-        AppSheetAction(
-          icon: Icons.content_copy,
-          label: '复制内容',
-          onTap: () {
-            final text = '${widget.post.title}\n${widget.post.content}';
-            Clipboard.setData(ClipboardData(text: text));
-            showAppToast(context, message: '已复制帖子内容');
-          },
         ),
       ],
     );
