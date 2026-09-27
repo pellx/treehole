@@ -49,55 +49,55 @@ Future<void> showAppActionsSheet({
         child: Container(
           decoration: BoxDecoration(
             color: colors.common.surface,
-            borderRadius: const BorderRadius.vertical(
-              top: Radius.circular(14),
-            ),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
           ),
           padding: const EdgeInsets.only(bottom: 5),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ...List.generate(actions.length, (i) {
-                final action = actions[i];
-                return Column(
-                  children: [
-                    ListTile(
-                      leading: action.icon != null
-                          ? Icon(
-                              action.icon,
-                              color: action.destructive
-                                  ? Colors.red
-                                  : onSurface,
-                              size: 22,
-                            )
-                          : null,
-                      title: Text(
-                        action.label,
-                        textAlign: action.icon == null
-                            ? TextAlign.center
-                            : TextAlign.start,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color:
-                              action.destructive ? Colors.red : onSurface,
+          child: Material(
+            type: MaterialType.transparency,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...List.generate(actions.length, (i) {
+                  final action = actions[i];
+                  return Column(
+                    children: [
+                      ListTile(
+                        leading: action.icon != null
+                            ? Icon(
+                                action.icon,
+                                color: action.destructive
+                                    ? Colors.red
+                                    : onSurface,
+                                size: 22,
+                              )
+                            : null,
+                        title: Text(
+                          action.label,
+                          textAlign: action.icon == null
+                              ? TextAlign.center
+                              : TextAlign.start,
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: action.destructive ? Colors.red : onSurface,
+                          ),
                         ),
+                        onTap: () {
+                          HapticFeedback.lightImpact();
+                          Navigator.of(ctx).pop();
+                          action.onTap();
+                        },
                       ),
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        Navigator.of(ctx).pop();
-                        action.onTap();
-                      },
-                    ),
-                    if (i < actions.length - 1)
-                      Divider(
-                        height: 1,
-                        indent: action.icon == null ? 0 : 56,
-                        color: colors.common.divider,
-                      ),
-                  ],
-                );
-              }),
-            ],
+                      if (i < actions.length - 1)
+                        Divider(
+                          height: 1,
+                          indent: action.icon == null ? 0 : 56,
+                          color: colors.common.divider,
+                        ),
+                    ],
+                  );
+                }),
+              ],
+            ),
           ),
         ),
       ),
@@ -159,10 +159,7 @@ Future<T?> showAppSelectorSheet<T>({
                       ),
                       title: Text(
                         labelBuilder(option),
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: onSurface,
-                        ),
+                        style: TextStyle(fontSize: 16, color: onSurface),
                       ),
                       onTap: () {
                         HapticFeedback.lightImpact();

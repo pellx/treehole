@@ -51,9 +51,23 @@ class _SearchPageState extends State<SearchPage> {
   DateTime? _customStart;
   DateTime? _customEnd;
 
+  void _purgeHidden() {
+    if (!mounted) return;
+    setState(() {
+      _posts.removeWhere((post) => PostStorage.isPostHidden(post.id));
+      _comments.removeWhere((id, _) => PostStorage.isPostHidden(id));
+      for (final entry in _comments.entries.toList()) {
+        _comments[entry.key] = entry.value
+            .where((c) => !PostStorage.isCommentHidden(c.id))
+            .toList();
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    PostStorage.visibilityRevision.addListener(_purgeHidden);
     _controller.addListener(() => setState(() {}));
     _loadHistory();
     // 进入页面后自动聚焦，唤出键盘
@@ -64,6 +78,7 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
+    PostStorage.visibilityRevision.removeListener(_purgeHidden);
     _controller.removeListener(() => setState(() {}));
     _controller.dispose();
     _focusNode.dispose();

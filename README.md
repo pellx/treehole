@@ -362,3 +362,8 @@ runApp(TreeholeApp(key: appKey));
 flutter test          # 运行所有测试
 dart analyze          # 静态分析（CI 必须通过）
 ```
+
+
+## 举报与自动隐藏
+
+帖子菜单可举报；回复长按提供复制、举报、收藏（占位）。同一内容由三个不同登录账号举报后自动隐藏，重复举报不计数。App 消费隐藏标记清理缓存。数据库迁移与部署步骤见 [REPORTS_DEPLOY.md](deploy/REPORTS_DEPLOY.md)。

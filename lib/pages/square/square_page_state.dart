@@ -112,13 +112,26 @@ mixin SquarePageStateMixin on State<SquarePage> {
   @override
   void initState() {
     super.initState();
+    PostStorage.visibilityRevision.addListener(_purgeHidden);
     _initLoad();
   }
 
   @override
   void dispose() {
+    PostStorage.visibilityRevision.removeListener(_purgeHidden);
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _purgeHidden() {
+    if (!mounted) return;
+    setState(() {
+      _posts.removeWhere((p) => PostStorage.isPostHidden(p.id));
+      _comments.removeWhere((id, _) => PostStorage.isPostHidden(id));
+      for (final list in _comments.values) {
+        list.removeWhere((c) => PostStorage.isCommentHidden(c.id));
+      }
+    });
   }
 
   // ---- 首次启动加载 ----
@@ -219,7 +232,9 @@ mixin SquarePageStateMixin on State<SquarePage> {
       final result = await futures[i];
       final post = result.post;
       _loadingIds.remove(batch[i]);
-      if (post != null && !_posts.any((p) => p.id == post.id)) {
+      if (post != null &&
+          !PostStorage.isPostHidden(post.id) &&
+          !_posts.any((p) => p.id == post.id)) {
         _comments[post.id] ??= PostStorage.getComments(post.comments);
         setState(() {
           _posts.add(post);
@@ -247,7 +262,8 @@ mixin SquarePageStateMixin on State<SquarePage> {
     }
 
     if (_loadedCount < _allIds.length && _scrollController.hasClients) {
-      final remaining = _scrollController.position.maxScrollExtent -
+      final remaining =
+          _scrollController.position.maxScrollExtent -
           _scrollController.position.pixels;
       if (remaining < 1500) {
         _loadMore();
@@ -259,11 +275,6 @@ mixin SquarePageStateMixin on State<SquarePage> {
   Future<void> _refresh() async {
     _loading = true;
     final metas = await _fetchIdListMeta();
-
-    if (metas.isEmpty) {
-      _loading = false;
-      return;
-    }
 
     final newIds = [for (final m in metas) m.id];
     _updateAtById = {for (final m in metas) m.id: m.updateAt};
@@ -294,8 +305,10 @@ mixin SquarePageStateMixin on State<SquarePage> {
 
   Future<void> _removeDeletedPosts(List<int> newIds) async {
     final newIdSet = newIds.toSet();
-    final removedIds =
-        _posts.map((p) => p.id).where((id) => !newIdSet.contains(id)).toList();
+    final removedIds = _posts
+        .map((p) => p.id)
+        .where((id) => !newIdSet.contains(id))
+        .toList();
     if (removedIds.isEmpty) return;
 
     for (final id in removedIds) {
@@ -353,15 +366,22 @@ mixin SquarePageStateMixin on State<SquarePage> {
         return (post: post, fresh: true);
       }),
     );
-    final newPosts = [for (final r in fetched) if (r.post != null) r.post!];
+    final newPosts = [
+      for (final r in fetched)
+        if (r.post != null) r.post!,
+    ];
     final freshIds = {
-      for (final r in fetched) if (r.fresh && r.post != null) r.post!.id,
+      for (final r in fetched)
+        if (r.fresh && r.post != null) r.post!.id,
     };
 
     // 拉取期间可能有在途的 _loadMore / 并发刷新已把同 id 帖子加入 _posts，
     // 插入前必须按当前 _posts 重新去重（同时去重 newPosts 内部重复 id）
     final currentIds = _posts.map((p) => p.id).toSet();
-    final deduped = [for (final p in newPosts) if (currentIds.add(p.id)) p];
+    final deduped = [
+      for (final p in newPosts)
+        if (currentIds.add(p.id)) p,
+    ];
 
     _allIds = newIds;
     _loadedCount = _posts.length + deduped.length;
@@ -386,8 +406,10 @@ mixin SquarePageStateMixin on State<SquarePage> {
       if (freshIds.contains(p.id)) _postsNeedCommentRefresh.add(p.id);
     }
 
-    final targets =
-        _posts.where((p) => freshIds.contains(p.id)).take(7).toList();
+    final targets = _posts
+        .where((p) => freshIds.contains(p.id))
+        .take(7)
+        .toList();
     for (final p in targets) {
       _postsNeedCommentRefresh.remove(p.id);
     }
@@ -414,7 +436,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
   /// 拉取单个帖子的评论数据并返回结果，不调用 setState。
   /// 仅用于批量刷新路径（帖子刚从 API 拉取，comment ID 列表已是最新）。
   Future<({int postId, List<Comment>? comments, Post? freshPost})>
-      _fetchCommentRefreshResult(Post post) async {
+  _fetchCommentRefreshResult(Post post) async {
     final newIds = post.comments;
     if (newIds.isEmpty) {
       return (postId: post.id, comments: null, freshPost: null);
@@ -438,8 +460,9 @@ mixin SquarePageStateMixin on State<SquarePage> {
         if (cmt != null) await PostStorage.saveComment(cmt);
         return cmt;
       });
-      final newCmts =
-          (await Future.wait(futures)).whereType<Comment>().toList();
+      final newCmts = (await Future.wait(
+        futures,
+      )).whereType<Comment>().toList();
       final existing = _comments[post.id] ?? PostStorage.getComments(newIds);
       merged = <Comment>[...existing];
       for (final c in newCmts) {
@@ -447,9 +470,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
       }
     }
 
-    merged.sort(
-      (a, b) => newIds.indexOf(a.id).compareTo(newIds.indexOf(b.id)),
-    );
+    merged.sort((a, b) => newIds.indexOf(a.id).compareTo(newIds.indexOf(b.id)));
     await PostStorage.updatePostCommentIds(post.id, newIds);
     return (postId: post.id, comments: merged, freshPost: null);
   }
@@ -598,7 +619,12 @@ mixin SquarePageStateMixin on State<SquarePage> {
       fresh = null;
     }
     if (fresh == null) {
-      if (mounted) showAppToast(context, message: '刷新失败，请检查网络');
+      if (mounted) {
+        showAppToast(
+          context,
+          message: PostStorage.isPostHidden(post.id) ? '该帖子已隐藏' : '刷新失败，请检查网络',
+        );
+      }
       return;
     }
     await PostStorage.savePost(fresh);

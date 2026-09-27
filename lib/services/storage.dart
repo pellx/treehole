@@ -10,6 +10,70 @@ import '../services/api.dart';
 
 class PostStorage {
   static const _idListKey = 'id_list';
+  static final visibilityRevision = ValueNotifier<int>(0);
+  static final Set<int> _hiddenPosts = {};
+  static final Set<int> _hiddenComments = {};
+  static final Set<String> _hiddenMedia = {};
+  static bool _ready = false;
+  static bool isPostHidden(int id) => _hiddenPosts.contains(id);
+  static bool isCommentHidden(int id) => _hiddenComments.contains(id);
+  static List<int> getCachedCommentIds() =>
+      _ready ? _commentBox.keys.whereType<int>().toList() : [];
+  static List<int> getVisibilityPostIds() => _ready ? getCachedIds() : [];
+
+  /// Tombstones are set before awaiting disk writes so older requests cannot restore content.
+  static Future<void> applyHidden({
+    List<int> posts = const [],
+    List<int> comments = const [],
+  }) async {
+    _hiddenPosts.addAll(posts);
+    _hiddenComments.addAll(comments);
+    if (_hiddenPosts.isEmpty && _hiddenComments.isEmpty) return;
+    if (_ready) {
+      for (final key in _commentBox.keys.whereType<int>().toList()) {
+        final raw = _commentBox.get(key);
+        if (raw is Map && _hiddenPosts.contains(raw['post_id'])) {
+          _hiddenComments.add(key);
+        }
+      }
+      await _idBox.put('hidden_posts', _hiddenPosts.toList());
+      await _idBox.put('hidden_comments', _hiddenComments.toList());
+      for (final id in posts) {
+        final raw = _postBox.get(id);
+        if (raw is Map) {
+          for (final image in (raw['images'] as List? ?? [])) {
+            final name = image['file_name'] as String?;
+            if (name != null) {
+              _hiddenMedia.add(name);
+              await _thumbBox.delete('thumb_$name');
+              try {
+                if (!name.contains('/') && !name.contains('\\')) {
+                  final file = File('${(await _pngCacheDir()).path}/$name');
+                  if (await file.exists()) await file.delete();
+                }
+              } catch (_) {}
+            }
+          }
+        }
+        await _postBox.delete(id);
+        await _commentBox.delete('draft_$id');
+      }
+      await _commentBox.deleteAll(_hiddenComments);
+      for (final key in _postBox.keys.whereType<int>().toList()) {
+        final raw = Map<String, dynamic>.from(_postBox.get(key) as Map);
+        raw['comments'] = (raw['comments'] as List? ?? [])
+            .where((id) => !_hiddenComments.contains(id))
+            .toList();
+        await _postBox.put(key, raw);
+      }
+      await _idBox.put(
+        _idListKey,
+        getIdList().where((id) => !isPostHidden(id)).toList(),
+      );
+    }
+    visibilityRevision.value++;
+  }
+
   static late Box _idBox;
   static late Box _postBox;
   static late Box _thumbBox;
@@ -33,6 +97,17 @@ class PostStorage {
       Hive.openBox('search_history').then((b) => _searchHistoryBox = b),
       Hive.openBox('post_draft').then((b) => _draftBox = b),
     ]);
+    _hiddenPosts
+      ..clear()
+      ..addAll((_idBox.get('hidden_posts') as List? ?? []).cast<int>());
+    _hiddenComments
+      ..clear()
+      ..addAll((_idBox.get('hidden_comments') as List? ?? []).cast<int>());
+    _ready = true;
+    await applyHidden(
+      posts: _hiddenPosts.toList(),
+      comments: _hiddenComments.toList(),
+    );
   }
 
   // ---- 发帖页本地暂存草稿 ----
@@ -108,8 +183,10 @@ class PostStorage {
 
   static ThemeMode getThemeMode() {
     final raw = _accountBox.get('theme_mode') as String?;
-    return ThemeMode.values.firstWhere((m) => m.name == raw,
-        orElse: () => ThemeMode.system);
+    return ThemeMode.values.firstWhere(
+      (m) => m.name == raw,
+      orElse: () => ThemeMode.system,
+    );
   }
 
   static Future<void> saveThemeMode(ThemeMode mode) async {
@@ -121,11 +198,13 @@ class PostStorage {
   static List<int> getIdList() {
     final raw = _idBox.get(_idListKey);
     if (raw == null) return [];
-    return List<int>.from(raw as List);
+    return List<int>.from(
+      raw as List,
+    ).where((id) => !isPostHidden(id)).toList();
   }
 
   static Future<void> saveIdList(List<int> ids) async {
-    await _idBox.put(_idListKey, ids);
+    await _idBox.put(_idListKey, ids.where((id) => !isPostHidden(id)).toList());
   }
 
   static List<int> mergeAndSaveIdList(List<int> newIds) {
@@ -141,6 +220,7 @@ class PostStorage {
   // ---- 帖子内容 ----
 
   static Post? getPost(int id) {
+    if (isPostHidden(id)) return null;
     final raw = _postBox.get(id);
     if (raw == null) return null;
     final map = Map<String, dynamic>.from(raw as Map);
@@ -173,6 +253,7 @@ class PostStorage {
   }
 
   static Future<void> savePost(Post post) async {
+    if (isPostHidden(post.id)) return;
     final map = <String, dynamic>{
       'id': post.id,
       'title': post.title,
@@ -182,12 +263,18 @@ class PostStorage {
       'created_at': post.createdAt,
       'update_at': post.updateAt,
       'images': post.images
-          .map((e) => {'file_name': e.fileName, 'width': e.width, 'height': e.height})
+          .map(
+            (e) => {
+              'file_name': e.fileName,
+              'width': e.width,
+              'height': e.height,
+            },
+          )
           .toList(),
       'attachments': post.attachments
           .map((e) => {'file_name': e.fileName, 'source_name': e.sourceName})
           .toList(),
-      'comments': post.comments,
+      'comments': post.comments.where((id) => !isCommentHidden(id)).toList(),
       'fetched': true,
     };
     await _postBox.put(post.id, map);
@@ -197,7 +284,7 @@ class PostStorage {
     final raw = _postBox.get(postId);
     if (raw == null) return;
     final map = Map<String, dynamic>.from(raw as Map);
-    map['comments'] = newIds;
+    map['comments'] = newIds.where((id) => !isCommentHidden(id)).toList();
     await _postBox.put(postId, map);
   }
 
@@ -228,8 +315,8 @@ class PostStorage {
   static List<Post> getAllCachedPosts() {
     return _postBox.keys
         .cast<int>()
-        .map((id) => getPost(id)!)
-        .where((p) => true)
+        .map((id) => getPost(id))
+        .whereType<Post>()
         .toList();
   }
 
@@ -254,6 +341,7 @@ class PostStorage {
   }
 
   static Future<void> saveThumbnail(String fileName, ThumbnailData data) async {
+    if (_hiddenMedia.contains(fileName)) return;
     await _thumbBox.put('thumb_$fileName', {
       'bytes': data.bytes,
       'w': data.width,
@@ -276,6 +364,7 @@ class PostStorage {
   }
 
   static Future<void> savePng(String fileName, Uint8List bytes) async {
+    if (_hiddenMedia.contains(fileName)) return;
     final file = File('${(await _pngCacheDir()).path}/$fileName');
     await file.writeAsBytes(bytes);
   }
@@ -283,6 +372,7 @@ class PostStorage {
   // ---- 回复缓存 ----
 
   static Comment? getComment(int id) {
+    if (isCommentHidden(id)) return null;
     final raw = _commentBox.get(id);
     if (raw == null) return null;
     final map = Map<String, dynamic>.from(raw as Map);
@@ -290,6 +380,7 @@ class PostStorage {
   }
 
   static Future<void> saveComment(Comment comment) async {
+    if (isCommentHidden(comment.id) || isPostHidden(comment.postId)) return;
     await _commentBox.put(comment.id, <String, dynamic>{
       'id': comment.id,
       'post_id': comment.postId,

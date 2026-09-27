@@ -17,6 +17,7 @@ import '../models/sms_result.dart';
 import '../models/upload_result.dart';
 import '../models/version_info.dart';
 import 'pow.dart';
+import 'storage.dart';
 
 bool _isHttpSuccess(int statusCode) => statusCode >= 200 && statusCode < 300;
 
@@ -135,6 +136,10 @@ class ApiService {
     final res = await _client.get(uri).timeout(_timeout);
     final decoded = jsonDecode(res.body);
     if (decoded is Map<String, dynamic>) {
+      await syncCachedVisibility();
+      decoded['items'] = (decoded['items'] as List)
+          .where((row) => !PostStorage.isPostHidden(row['id'] as int))
+          .toList();
       return IdListV2Result.fromJson(decoded);
     }
     throw Exception(
@@ -152,7 +157,17 @@ class ApiService {
         debugPrint('[ApiService] getPost($id) status=${res.statusCode}');
         return null;
       }
-      return Post.fromJson(jsonDecode(res.body));
+      final data = jsonDecode(res.body);
+      if (data is Map && data['hidden'] == true) {
+        await PostStorage.applyHidden(posts: [id]);
+        return null;
+      }
+      if (data is Map && data['hidden_comment_ids'] is List) {
+        final ids = (data['hidden_comment_ids'] as List).cast<int>();
+        if (ids.isNotEmpty) await PostStorage.applyHidden(comments: ids);
+      }
+      if (PostStorage.isPostHidden(id)) return null;
+      return Post.fromJson(data);
     } catch (e) {
       debugPrint('[ApiService] getPost($id) error: $e');
       return null;
@@ -162,17 +177,90 @@ class ApiService {
   static Future<Post?> getPostV2(int id) async {
     if (_useMock) return _mockPost(id);
     try {
-      final res =
-          await _client.get(Uri.parse('$_baseV2/$id')).timeout(_timeout);
+      final res = await _client
+          .get(Uri.parse('$_baseV2/$id'))
+          .timeout(_timeout);
       if (!_isHttpSuccess(res.statusCode)) {
         debugPrint('[ApiService] getPostV2($id) status=${res.statusCode}');
         return null;
       }
-      return Post.fromJson(jsonDecode(res.body));
+      final data = jsonDecode(res.body);
+      if (data is Map && data['hidden'] == true) {
+        await PostStorage.applyHidden(posts: [id]);
+        return null;
+      }
+      if (data is Map && data['hidden_comment_ids'] is List) {
+        final ids = (data['hidden_comment_ids'] as List).cast<int>();
+        if (ids.isNotEmpty) await PostStorage.applyHidden(comments: ids);
+      }
+      if (PostStorage.isPostHidden(id)) return null;
+      return Post.fromJson(data);
     } catch (e) {
       debugPrint('[ApiService] getPostV2($id) error: $e');
       return null;
     }
+  }
+
+  static Future<void> syncCachedVisibility() async {
+    final posts = PostStorage.getVisibilityPostIds();
+    final comments = PostStorage.getCachedCommentIds();
+    for (var i = 0; i < posts.length || i < comments.length; i += 200) {
+      final res = await _client
+          .post(
+            Uri.parse('$_base/visibility'),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'post_ids': posts.skip(i).take(200).toList(),
+              'comment_ids': comments.skip(i).take(200).toList(),
+            }),
+          )
+          .timeout(_timeout);
+      if (!_isHttpSuccess(res.statusCode)) throw Exception('无法核对内容可见性，请重试');
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final hiddenPosts = (data['hidden_posts'] as List).cast<int>();
+      final hiddenComments = (data['hidden_comments'] as List).cast<int>();
+      if (hiddenPosts.isNotEmpty || hiddenComments.isNotEmpty) {
+        await PostStorage.applyHidden(
+          posts: hiddenPosts,
+          comments: hiddenComments,
+        );
+      }
+    }
+  }
+
+  static Future<Map<String, dynamic>> reportContent({
+    required String type,
+    required int id,
+    required String reason,
+    required int sessionId,
+    required String sessionSecret,
+  }) async {
+    final res = await _client
+        .post(
+          Uri.parse('$_base/reports'),
+          headers: {
+            'Content-Type': 'application/json',
+            'x-session-id': '$sessionId',
+            'x-session-secret': sessionSecret,
+          },
+          body: jsonEncode({
+            'target_type': type,
+            'target_id': id,
+            'reason': reason,
+          }),
+        )
+        .timeout(_timeout);
+    if (!_isHttpSuccess(res.statusCode)) {
+      throw Exception(_parseErrorMessage(res.body));
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    if (data['hidden'] == true) {
+      await PostStorage.applyHidden(
+        posts: type == 'post' ? [id] : [],
+        comments: type == 'comment' ? [id] : [],
+      );
+    }
+    return data;
   }
 
   static Future<ThumbnailData?> downloadThumbnail(String fileName) async {
@@ -360,7 +448,13 @@ class ApiService {
         debugPrint('[ApiService] getComment($id) status=${res.statusCode}');
         return null;
       }
-      return Comment.fromJson(jsonDecode(res.body));
+      final data = jsonDecode(res.body);
+      if (data is Map && data['hidden'] == true) {
+        await PostStorage.applyHidden(comments: [id]);
+        return null;
+      }
+      if (PostStorage.isCommentHidden(id)) return null;
+      return Comment.fromJson(data);
     } catch (e) {
       debugPrint('[ApiService] getComment($id) error: $e');
       return null;
@@ -570,9 +664,11 @@ class ApiService {
           'nonce': verificationPow.nonce,
         },
       };
-      debugPrint('[ApiService] registerV2 提交 name=$userDisplayId '
-          'captchaTicket=$captchaTicket captcha(len=${verificationCaptcha?.length}) '
-          'pow=${verificationPow.challengeId}/nonce=${verificationPow.nonce}');
+      debugPrint(
+        '[ApiService] registerV2 提交 name=$userDisplayId '
+        'captchaTicket=$captchaTicket captcha(len=${verificationCaptcha?.length}) '
+        'pow=${verificationPow.challengeId}/nonce=${verificationPow.nonce}',
+      );
       final res = await _client
           .post(
             Uri.parse('$_userBase/registerV2'),
@@ -622,9 +718,7 @@ class ApiService {
       );
       final res = await _client.get(uri).timeout(_timeout);
       if (!_isHttpSuccess(res.statusCode)) {
-        debugPrint(
-          '[ApiService] registerV2/result status=${res.statusCode}',
-        );
+        debugPrint('[ApiService] registerV2/result status=${res.statusCode}');
         if (!preserveLastError && res.statusCode != 404) {
           lastError = _parseErrorMessage(res.body);
         }
@@ -1382,7 +1476,8 @@ class ApiService {
               body: jsonEncode({
                 'phone': phone,
                 'scene': scene,
-                if (fingerprintHash != null) 'fingerprint_hash': fingerprintHash,
+                if (fingerprintHash != null)
+                  'fingerprint_hash': fingerprintHash,
               }),
             )
             .timeout(_timeout);
