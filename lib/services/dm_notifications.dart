@@ -1,3 +1,4 @@
+import 'package:app_settings/app_settings.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -11,6 +12,36 @@ class DmNotifications {
   static final _versions = <int, int>{};
   static int _epoch = 0;
   static VoidCallback? onOpenMessages;
+  @visibleForTesting
+  static Future<bool?> Function()? debugPermissionStatus;
+  @visibleForTesting
+  static Future<void> Function()? debugOpenSettings;
+
+  static Future<bool?> permissionEnabled() async {
+    if (debugPermissionStatus != null) return debugPermissionStatus!();
+    if (!_supported) return false;
+    await initialize();
+    if (Platform.isAndroid) {
+      return _plugin
+          .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin
+          >()
+          ?.areNotificationsEnabled();
+    }
+    final status = await _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >()
+        ?.checkPermissions();
+    return status?.isEnabled == true || status?.isProvisionalEnabled == true;
+  }
+
+  static Future<void> openSystemNotificationSettings() async {
+    if (debugOpenSettings != null) return debugOpenSettings!();
+    if (!_supported) return;
+    await AppSettings.openAppSettings(type: AppSettingsType.notification);
+  }
+
   static bool get _supported =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 

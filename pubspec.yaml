@@ -34,6 +34,7 @@ dependencies:
   uuid: ^4.5.1
   webview_flutter: ^4.10.0
   socket_io_client: ^3.1.2
+  app_settings: 7.0.0
 
 dev_dependencies:
   flutter_test:

@@ -9,6 +9,7 @@ import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_bottom_sheet.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/user_avatar.dart';
+import '../../theme/app_colors.dart';
 import '../account/register_page.dart';
 import 'dm_chat_page.dart';
 import 'system_inbox_page.dart';
@@ -35,6 +36,14 @@ class _MessagesPageState extends State<MessagesPage>
   bool _refreshPending = false;
   StreamSubscription? _realtimeSubscription;
   bool _requiresLogin = false;
+  bool _notificationsEnabled = false;
+
+  Future<void> _refreshNotificationPermission() async {
+    try {
+      final enabled = await DmNotifications.permissionEnabled();
+      if (mounted) setState(() => _notificationsEnabled = enabled == true);
+    } catch (_) {}
+  }
 
   @override
   void initState() {
@@ -55,6 +64,7 @@ class _MessagesPageState extends State<MessagesPage>
       _load(reset: true, silent: true);
     });
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_refreshNotificationPermission());
     if (widget.active) _scheduleReload();
   }
 
@@ -74,7 +84,10 @@ class _MessagesPageState extends State<MessagesPage>
       _userId = null;
       _api?.close();
       _api = null;
-      if (widget.active) _scheduleReload();
+      if (widget.active) {
+        _scheduleReload();
+        unawaited(_refreshNotificationPermission());
+      }
     }
   }
 
@@ -83,7 +96,8 @@ class _MessagesPageState extends State<MessagesPage>
     if (state == AppLifecycleState.resumed &&
         widget.active &&
         ModalRoute.of(context)?.isCurrent == true) {
-      _load(reset: true);
+      _load(reset: true, silent: true);
+      unawaited(_refreshNotificationPermission());
     }
   }
 
@@ -159,9 +173,6 @@ class _MessagesPageState extends State<MessagesPage>
         _systemCounts = summary['counts'] as Map<String, dynamic>;
       });
       unawaited(DmInbox.refresh());
-      unawaited(
-        DmNotifications.requestPermission(once: true).catchError((_) => false),
-      );
     } catch (error) {
       if (mounted && generation == _generation) {
         setState(() {
@@ -186,17 +197,12 @@ class _MessagesPageState extends State<MessagesPage>
     }
   }
 
-  Future<void> _requestNotifications() async {
+  Future<void> _openNotificationSettings() async {
     try {
-      final enabled = await DmNotifications.requestPermission();
-      if (mounted) {
-        showAppToast(
-          context,
-          message: enabled == true ? '已开启通知权限' : '未开启通知，可在系统设置中开启',
-        );
-      }
+      await DmNotifications.openSystemNotificationSettings();
+      await _refreshNotificationPermission();
     } catch (_) {
-      if (mounted) showAppToast(context, message: '无法申请通知权限，请在系统设置中检查');
+      if (mounted) showAppToast(context, message: '无法打开通知设置');
     }
   }
 
@@ -281,11 +287,6 @@ class _MessagesPageState extends State<MessagesPage>
           label: '刷新消息',
           onTap: () => _load(reset: true, silent: true),
         ),
-        AppSheetAction(
-          icon: Icons.notifications_outlined,
-          label: '通知权限',
-          onTap: () => _requestNotifications(),
-        ),
       ],
     );
   }
@@ -301,9 +302,30 @@ class _MessagesPageState extends State<MessagesPage>
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<AppColors>()!;
     return AppScaffold(
       title: '消息',
       automaticallyImplyLeading: false,
+      leading: IconButton(
+        tooltip: _notificationsEnabled ? '消息通知已开启，打开系统设置' : '开启消息通知',
+        onPressed: _openNotificationSettings,
+        icon: _notificationsEnabled
+            ? Stack(
+                alignment: Alignment.center,
+                children: [
+                  Icon(
+                    Icons.notifications,
+                    color: colors.common.barText.withValues(alpha: 0.5),
+                  ),
+                  Icon(
+                    Icons.check,
+                    size: 11,
+                    color: colors.common.drawerHeaderBg,
+                  ),
+                ],
+              )
+            : Icon(Icons.notifications_none, color: colors.common.green),
+      ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

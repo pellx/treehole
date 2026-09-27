@@ -8,6 +8,7 @@ import '../theme/app_dimens.dart';
 class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
   final Widget? trailing;
+  final Widget? leading;
   final VoidCallback? onBack;
   final bool automaticallyImplyLeading;
   final Color? backgroundColor;
@@ -17,6 +18,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
     super.key,
     required this.title,
     this.trailing,
+    this.leading,
     this.onBack,
     this.automaticallyImplyLeading = true,
     this.backgroundColor,
@@ -52,19 +54,21 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
                   color: barText,
                 ),
               ),
-              leading: automaticallyImplyLeading
-                  ? IconButton(
-                      icon: Icon(
-                        _useCupertinoBack(context)
-                            ? Icons.arrow_back_ios
-                            : Icons.arrow_back,
-                        color: barText,
-                        size: 24,
-                      ),
-                      onPressed:
-                          onBack ?? () => Navigator.of(context).maybePop(),
-                    )
-                  : const SizedBox(width: 48),
+              leading:
+                  leading ??
+                  (automaticallyImplyLeading
+                      ? IconButton(
+                          icon: Icon(
+                            _useCupertinoBack(context)
+                                ? Icons.arrow_back_ios
+                                : Icons.arrow_back,
+                            color: barText,
+                            size: 24,
+                          ),
+                          onPressed:
+                              onBack ?? () => Navigator.of(context).maybePop(),
+                        )
+                      : const SizedBox(width: 48)),
               trailing: trailing ?? const SizedBox(width: 48),
             ),
           ),
@@ -87,6 +91,7 @@ class AppScaffold extends StatelessWidget {
   final String title;
   final Widget body;
   final Widget? trailing;
+  final Widget? leading;
   final bool automaticallyImplyLeading;
   final bool resizeToAvoidBottomInset;
   final Color? backgroundColor;
@@ -97,6 +102,7 @@ class AppScaffold extends StatelessWidget {
     required this.title,
     required this.body,
     this.trailing,
+    this.leading,
     this.automaticallyImplyLeading = true,
     this.resizeToAvoidBottomInset = true,
     this.backgroundColor,
@@ -114,6 +120,7 @@ class AppScaffold extends StatelessWidget {
           AppAppBar(
             title: title,
             trailing: trailing,
+            leading: leading,
             onBack: onBack,
             automaticallyImplyLeading: automaticallyImplyLeading,
           ),
