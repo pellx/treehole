@@ -105,15 +105,49 @@ class _MessagesPageState extends State<MessagesPage>
       if (reset && !silent) {
         _api?.close();
         _api = null;
-        setState(() {
-          _items.clear();
-          _userId = null;
-          _next = null;
-        });
+        final local = await DmApi.openLocal();
+        final cachedAccount = local?.accountToken;
+        if (local != null) {
+          try {
+            final cached = await local.cached('dm', 'conversations');
+            final summary = await local.cached('system', 'summary');
+            if (mounted && generation == _generation && cached != null) {
+              setState(() {
+                _items
+                  ..clear()
+                  ..addAll(
+                    (cached['items'] as List).cast<Map<String, dynamic>>(),
+                  );
+                _userId = cached['user_id'] as int?;
+                _next = cached['next_before_id'] as int?;
+                _nextPinned = cached['next_before_pinned'] as int? ?? 0;
+                _systemCounts =
+                    summary?['counts'] as Map<String, dynamic>? ?? {};
+              });
+            }
+          } finally {
+            local.close();
+          }
+        } else {
+          setState(() {
+            _items.clear();
+            _userId = null;
+            _next = null;
+            _systemCounts = {};
+          });
+        }
         final api = await DmApi.open();
         if (!mounted || generation != _generation) {
           api.close();
           return;
+        }
+        if (cachedAccount != api.accountToken) {
+          setState(() {
+            _items.clear();
+            _userId = null;
+            _next = null;
+            _systemCounts = {};
+          });
         }
         _api = api;
       }
@@ -123,7 +157,7 @@ class _MessagesPageState extends State<MessagesPage>
       final summary = await _api!.systemRequest('summary');
       if (!mounted || generation != _generation) return;
       setState(() {
-        if (reset) _items.clear();
+        _items.clear();
         _userId = data['user_id'] as int;
         _items.addAll((data['items'] as List).cast<Map<String, dynamic>>());
         _next = data['next_before_id'] as int?;
@@ -139,6 +173,11 @@ class _MessagesPageState extends State<MessagesPage>
         setState(() {
           _failed = true;
           _requiresLogin = error is DmException && error.requiresLogin;
+          if (_requiresLogin) {
+            _items.clear();
+            _userId = null;
+            _systemCounts = {};
+          }
         });
         dismiss();
         if (!silent) showAppToast(context, message: error.toString());

@@ -73,19 +73,40 @@ class _SystemInboxPageState extends State<SystemInboxPage>
             duration: const Duration(seconds: 25),
           );
     try {
+      if (_items.isEmpty) {
+        try {
+          final cached = await widget.api.cached(
+            'system',
+            '?category=${widget.category}',
+          );
+          if (mounted && cached != null) {
+            setState(() {
+              _items
+                ..clear()
+                ..addAll(
+                  (cached['items'] as List).cast<Map<String, dynamic>>(),
+                );
+              _next = cached['next_before_id'] as int?;
+            });
+          }
+        } catch (_) {}
+      }
       final data = await widget.api.systemRequest(
         '?category=${widget.category}${!reset && _next != null ? '&before_id=$_next' : ''}',
       );
       if (!mounted) return;
       setState(() {
-        if (reset) _items.clear();
+        _items.clear();
         _items.addAll((data['items'] as List).cast<Map<String, dynamic>>());
         _next = data['next_before_id'] as int?;
       });
     } catch (error) {
       dismiss();
       if (mounted) {
-        setState(() => _failed = true);
+        setState(() {
+          _failed = true;
+          if (error is DmException && error.requiresLogin) _items.clear();
+        });
         if (!silent) showAppToast(context, message: error.toString());
       }
     } finally {
@@ -103,7 +124,11 @@ class _SystemInboxPageState extends State<SystemInboxPage>
   Future<void> _open(Map<String, dynamic> item) async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => _SystemMessageDetail(api: widget.api, item: item),
+        builder: (_) => _SystemMessageDetail(
+          api: widget.api,
+          item: item,
+          category: widget.category,
+        ),
       ),
     );
     if (mounted) await _load(reset: true, silent: true);
@@ -170,15 +195,47 @@ class _SystemInboxPageState extends State<SystemInboxPage>
 class _SystemMessageDetail extends StatefulWidget {
   final DmApi api;
   final Map<String, dynamic> item;
-  const _SystemMessageDetail({required this.api, required this.item});
+  final String category;
+  const _SystemMessageDetail({
+    required this.api,
+    required this.item,
+    required this.category,
+  });
   @override
   State<_SystemMessageDetail> createState() => _SystemMessageDetailState();
 }
 
 class _SystemMessageDetailState extends State<_SystemMessageDetail> {
+  late Map<String, dynamic> _item;
+  StreamSubscription? _events;
+  Future<void> _refresh() async {
+    try {
+      final data = await widget.api.systemRequest(
+        '?category=${widget.category}',
+      );
+      final matches = (data['items'] as List)
+          .cast<Map<String, dynamic>>()
+          .where((row) => row['id'] == widget.item['id']);
+      if (mounted && matches.isNotEmpty) setState(() => _item = matches.first);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _events?.cancel();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    _item = widget.item;
+    _events = RealtimeService.instance.dmEvents.listen((event) {
+      if (event.sessionId == widget.api.sessionId &&
+          (event.conversationId == null || event.conversationId == 0)) {
+        _refresh();
+      }
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _read());
   }
 
@@ -193,7 +250,7 @@ class _SystemMessageDetailState extends State<_SystemMessageDetail> {
 
   @override
   Widget build(BuildContext context) {
-    final item = widget.item;
+    final item = _item;
     final date = DateTime.tryParse(
       item['created_at']?.toString() ?? '',
     )?.toLocal();

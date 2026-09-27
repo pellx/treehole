@@ -367,3 +367,7 @@ dart analyze          # 静态分析（CI 必须通过）
 ## 举报与自动隐藏
 
 帖子菜单可举报；回复长按提供复制、举报、收藏（占位）。同一内容由三个不同登录账号举报后自动隐藏，重复举报不计数。App 消费隐藏标记清理缓存。数据库迁移与部署步骤见 [REPORTS_DEPLOY.md](deploy/REPORTS_DEPLOY.md)。
+
+## 消息缓存与私信审核
+
+消息列表和已加载历史按账号加密缓存，联网时增量同步。私信发送须通过审核，连续三条明确拒绝后关闭该账号发送能力；审核服务异常不计违规。数据库、审核配置与启用步骤见 [MESSAGE_CACHE_MODERATION_DEPLOY.md](deploy/MESSAGE_CACHE_MODERATION_DEPLOY.md)。

@@ -1,3 +1,5 @@
+import 'message_cache.dart';
+import 'message_sync.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -9,7 +11,8 @@ import 'realtime_service.dart';
 class DmException implements Exception {
   final String message;
   final bool requiresLogin;
-  const DmException(this.message, {this.requiresLogin = false});
+  final String? code;
+  const DmException(this.message, {this.requiresLogin = false, this.code});
   @override
   String toString() => message;
 }
@@ -19,11 +22,40 @@ class DmApi {
   final int sessionId;
   final String sessionSecret;
   final http.Client _client = http.Client();
-  DmApi._(this.sessionId, this.sessionSecret);
+  final String accountToken;
+  DmApi._(this.sessionId, this.sessionSecret, this.accountToken);
+  Future<MessageSync> _sync() async =>
+      MessageSync(await MessageCache.open(accountToken), _request);
+
+  static Future<DmApi?> openLocal() async {
+    final id = await DeviceCredentialStore.getSessionId();
+    final secret = await DeviceCredentialStore.getSessionSecret();
+    final token = await DeviceCredentialStore.getUserExternalToken();
+    if (id == null || secret == null || token == null) return null;
+    return DmApi._(id, secret, token);
+  }
+
+  Future<Map<String, dynamic>?> cached(String namespace, String path) async {
+    await _checkSession();
+    final key = MessageSync.keyFor(namespace, path);
+    if (key == null) return null;
+    final data = (await MessageCache.open(accountToken)).read(key);
+    await _checkSession();
+    return data;
+  }
+
+  Future<Map<String, dynamic>> _load(String namespace, String path) async {
+    await _checkSession();
+    final result = await (await _sync()).load(namespace, path);
+    await _checkSession();
+    return result;
+  }
 
   static Future<DmApi> open() async {
     if (!await SessionService.instance.ensureSession()) {
       if (ApiService.isNetworkError(ApiService.lastError)) {
+        final local = await openLocal();
+        if (local != null) return local;
         throw DmException(ApiService.lastError!);
       }
       throw const DmException('请先登录，再打开消息', requiresLogin: true);
@@ -33,12 +65,15 @@ class DmApi {
     if (id == null || secret == null) {
       throw const DmException('请先登录，再打开消息', requiresLogin: true);
     }
-    return DmApi._(id, secret);
+    final token = await DeviceCredentialStore.getUserExternalToken();
+    if (token == null) throw const DmException('请先登录', requiresLogin: true);
+    return DmApi._(id, secret, token);
   }
 
   Future<void> _checkSession() async {
     if (await DeviceCredentialStore.getSessionId() != sessionId ||
-        await DeviceCredentialStore.getSessionSecret() != sessionSecret) {
+        await DeviceCredentialStore.getSessionSecret() != sessionSecret ||
+        await DeviceCredentialStore.getUserExternalToken() != accountToken) {
       throw const DmException('登录状态已变化，请返回消息页重新进入');
     }
   }
@@ -46,12 +81,48 @@ class DmApi {
   Future<Map<String, dynamic>> request(
     String path, {
     Map<String, dynamic>? body,
-  }) => _request('dm', path, body: body);
+  }) async {
+    if (body == null) return _load('dm', path);
+    final data = await _request('dm', path, body: body);
+    if (path == 'conversations') {
+      try {
+        final row = data['conversation'] as Map<String, dynamic>;
+        final cache = await MessageCache.open(accountToken);
+        await cache.serial('dm/conversations', () async {
+          final saved = cache.read('dm/conversations');
+          if (saved != null &&
+              !(saved['items'] as List).any(
+                (item) => item['id'] == row['id'],
+              )) {
+            final state = await _request(
+              'dm',
+              'conversations/state',
+              body: {
+                'known': [
+                  {'id': row['id'], 'hash': List.filled(64, '0').join()},
+                ],
+              },
+            );
+            (saved['items'] as List).addAll(state['items'] as List);
+            await cache.write('dm/conversations', saved);
+          }
+        });
+      } catch (_) {}
+    }
+    if (RegExp(r'^conversations/[0-9]+/messages$').hasMatch(path)) {
+      try {
+        await (await _sync()).recordSent(path, data);
+      } catch (_) {}
+    }
+    return data;
+  }
 
   Future<Map<String, dynamic>> systemRequest(
     String path, {
     Map<String, dynamic>? body,
-  }) => _request('system', path, body: body);
+  }) => body == null
+      ? _load('system', path)
+      : _request('system', path, body: body);
 
   Future<Map<String, dynamic>> _request(
     String namespace,
@@ -76,6 +147,7 @@ class DmApi {
       await _checkSession();
       if (response.statusCode == 401) {
         SessionService.instance.invalidate();
+        await (await MessageCache.open(accountToken)).clear();
         throw const DmException('登录已失效，请返回消息页重新登录', requiresLogin: true);
       }
       if (response.statusCode == 404 &&
@@ -95,6 +167,7 @@ class DmApi {
               : message is List
               ? message.join('；')
               : '请求失败，请重试',
+          code: decoded['code'] as String?,
         );
       }
       return decoded;

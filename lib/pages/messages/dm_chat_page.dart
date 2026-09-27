@@ -193,6 +193,27 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
             duration: const Duration(seconds: 25),
           );
     try {
+      if (!_loaded) {
+        try {
+          final cached = await widget.api.cached(
+            'dm',
+            'conversations/${widget.conversationId}/messages',
+          );
+          if (mounted && cached != null && cached['user_id'] == widget.userId) {
+            setState(() {
+              _messages
+                ..clear()
+                ..addAll(
+                  (cached['items'] as List).cast<Map<String, dynamic>>(),
+                );
+              _next = cached['next_before_seq'] as int?;
+              _lastRead = cached['last_read_seq'] as int? ?? 0;
+              _applyDetails(cached);
+              _loaded = true;
+            });
+          }
+        } catch (_) {}
+      }
       final result = await widget.api.request(
         'conversations/${widget.conversationId}/messages${older && _next != null ? '?before_seq=$_next' : ''}',
       );
@@ -208,6 +229,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
             (m) => !known.contains(m['id']),
           ),
         );
+        _messages.sort((a, b) => (b['seq'] as int).compareTo(a['seq'] as int));
         _next = result['next_before_seq'] as int?;
         final acknowledged = result['last_read_seq'] as int? ?? 0;
         if (acknowledged > _lastRead) _lastRead = acknowledged;
@@ -217,6 +239,12 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
       WidgetsBinding.instance.addPostFrameCallback((_) => _markVisibleRead());
     } catch (error) {
       dismiss();
+      if (mounted && error is DmException && error.requiresLogin) {
+        setState(() {
+          _messages.clear();
+          _canSend = false;
+        });
+      }
       if (mounted && !silent) showAppToast(context, message: error.toString());
     } finally {
       dismiss();
@@ -266,7 +294,15 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
     } catch (error) {
       dismiss();
       if (mounted) {
-        showAppToast(context, message: '${error.toString()}；可再次点击发送');
+        if (error is DmException && error.code == 'DM_SEND_DISABLED') {
+          setState(() => _canSend = false);
+        }
+        showAppToast(
+          context,
+          message: error is DmException && error.code == 'DM_SEND_DISABLED'
+              ? error.toString()
+              : '${error.toString()}；可修改内容或重试',
+        );
       }
     } finally {
       dismiss();
