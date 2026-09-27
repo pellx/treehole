@@ -16,7 +16,7 @@ import '../../theme/app_square_top_bar_theme.dart';
 import '../../widgets/app_empty_state.dart';
 import '../../widgets/app_error_state.dart';
 import '../../widgets/app_loading_indicator.dart';
-import '../../widgets/app_snackbar.dart';
+import '../../widgets/app_toast.dart';
 import '../../widgets/image_overlay.dart';
 import '../../widgets/live_pop_scope.dart';
 import '../../widgets/post_card.dart';

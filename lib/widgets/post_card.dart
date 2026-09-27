@@ -15,7 +15,7 @@ import '../services/session_service.dart';
 import '../pages/account/register_page.dart';
 import '../pages/settings/settings_navigation.dart';
 import '../widgets/app_bottom_sheet.dart';
-import '../widgets/app_snackbar.dart';
+import '../widgets/app_toast.dart';
 import 'image_overlay.dart';
 
 class PostCard extends StatefulWidget {
@@ -839,7 +839,7 @@ class _PostCardState extends State<PostCard> {
         sessionSecret == null ||
         sessionSecret.isEmpty) {
       if (!mounted) return;
-      showAppSnackBar(context, message: '登录状态已失效，请重新登录');
+      showAppToast(context, message: '登录状态已失效，请重新登录');
       return;
     }
     final result = await ApiService.createComment(
@@ -858,7 +858,7 @@ class _PostCardState extends State<PostCard> {
       _dismissCommentOverlay();
       widget.onNeedCommentRefresh?.call();
     } else {
-      showAppSnackBar(context, message: ApiService.lastError ?? '评论发送失败');
+      showAppToast(context, message: ApiService.lastError ?? '评论发送失败');
     }
   }
 
@@ -1121,12 +1121,12 @@ class _PostCardState extends State<PostCard> {
         AppSheetAction(
           icon: Icons.star_border,
           label: '收藏',
-          onTap: () => showAppSnackBar(context, message: '收藏功能即将上线'),
+          onTap: () => showAppToast(context, message: '收藏功能即将上线'),
         ),
         AppSheetAction(
           icon: Icons.report_outlined,
           label: '举报',
-          onTap: () => showAppSnackBar(context, message: '举报功能即将上线'),
+          onTap: () => showAppToast(context, message: '举报功能即将上线'),
         ),
         AppSheetAction(
           icon: Icons.content_copy,
@@ -1134,7 +1134,7 @@ class _PostCardState extends State<PostCard> {
           onTap: () {
             final text = '${widget.post.title}\n${widget.post.content}';
             Clipboard.setData(ClipboardData(text: text));
-            showAppSnackBar(context, message: '已复制帖子内容');
+            showAppToast(context, message: '已复制帖子内容');
           },
         ),
       ],

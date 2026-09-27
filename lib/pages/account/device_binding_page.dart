@@ -14,7 +14,7 @@ import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_empty_state.dart';
 import '../../widgets/app_error_state.dart';
 import '../../widgets/app_loading_indicator.dart';
-import '../../widgets/app_snackbar.dart';
+import '../../widgets/app_toast.dart';
 import '../../widgets/device_card.dart';
 
 /// 设备绑定页：先展示本地缓存，再请求最新并按需更新
@@ -285,7 +285,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     final session = await _readySession();
     if (session == null) {
       if (!mounted) return;
-      showAppSnackBar(context, message: '会话验证失败，请稍后重试');
+      showAppToast(context, message: '会话验证失败，请稍后重试');
       return;
     }
     final ok = await ApiService.cancelPrimaryTransfer(
@@ -294,7 +294,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     );
     if (!mounted) return;
     if (!ok) {
-      showAppSnackBar(
+      showAppToast(
         context,
         message: _primaryErrorText(ApiService.lastError),
       );
@@ -330,7 +330,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     );
     await _loadDevices();
     if (!mounted) return;
-    showAppSnackBar(
+    showAppToast(
       context,
       message: '已取消主设备迁移',
       duration: const Duration(seconds: 1),
@@ -342,7 +342,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     final session = await _readySession();
     if (session == null) {
       if (!mounted) return;
-      showAppSnackBar(context, message: '会话验证失败，请稍后重试');
+      showAppToast(context, message: '会话验证失败，请稍后重试');
       return;
     }
     final result = await ApiService.requestPrimaryTransfer(
@@ -352,7 +352,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     );
     if (!mounted) return;
     if (result == null) {
-      showAppSnackBar(
+      showAppToast(
         context,
         message: _primaryErrorText(ApiService.lastError),
       );
@@ -368,7 +368,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     final tip = result.primaryTransferExecuteAt != null
         ? '主设备迁移已申请，将于 ${_formatTransferTime(result.primaryTransferExecuteAt!)} 生效'
         : '主设备迁移已申请，将于两天后生效';
-    showAppSnackBar(
+    showAppToast(
       context,
       message: tip,
       duration: const Duration(seconds: 2),
@@ -396,7 +396,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
       setState(() => _devices[index] = previous);
       await _persistDevicesFromCards();
       if (!mounted) return;
-      showAppSnackBar(context, message: '会话验证失败，请稍后重试');
+      showAppToast(context, message: '会话验证失败，请稍后重试');
       return;
     }
 
@@ -411,7 +411,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
       setState(() => _devices[index] = previous);
       await _persistDevicesFromCards();
       if (!mounted) return;
-      showAppSnackBar(context, message: ApiService.lastError ?? '设备改名失败');
+      showAppToast(context, message: ApiService.lastError ?? '设备改名失败');
       return;
     }
 
@@ -429,7 +429,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     final session = await _readySession();
     if (session == null) {
       if (!mounted) return;
-      showAppSnackBar(context, message: '会话验证失败，请稍后重试');
+      showAppToast(context, message: '会话验证失败，请稍后重试');
       return;
     }
 
@@ -440,7 +440,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     );
     if (!mounted) return;
     if (result == null) {
-      showAppSnackBar(
+      showAppToast(
         context,
         message: _primaryErrorText(ApiService.lastError),
       );
@@ -452,7 +452,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
         _devices.removeAt(index);
         _devices = _decorate(_devices);
       });
-      showAppSnackBar(
+      showAppToast(
         context,
         message: '已解绑该设备',
         duration: const Duration(seconds: 1),
@@ -572,7 +572,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     final session = await _readySession();
     if (session == null) {
       if (!mounted) return;
-      showAppSnackBar(context, message: '会话验证失败，请稍后重试');
+      showAppToast(context, message: '会话验证失败，请稍后重试');
       return;
     }
 
@@ -585,12 +585,12 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     setState(() => _transferring = false);
 
     if (result == null) {
-      showAppSnackBar(context, message: ApiService.lastError ?? '转移申请失败');
+      showAppToast(context, message: ApiService.lastError ?? '转移申请失败');
       return;
     }
 
     final minutes = (result.expiresIn / 60).ceil();
-    showAppSnackBar(
+    showAppToast(
       context,
       message: '转移申请已创建，$minutes分钟内有效',
       duration: const Duration(seconds: 3),
@@ -602,7 +602,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     final session = await _readySession();
     if (session == null) {
       if (!mounted) return;
-      showAppSnackBar(context, message: '会话验证失败，请稍后重试');
+      showAppToast(context, message: '会话验证失败，请稍后重试');
       return;
     }
 
@@ -613,7 +613,7 @@ class _DeviceBindingPageState extends State<DeviceBindingPage> {
     );
     if (!mounted) return;
     if (!ok) {
-      showAppSnackBar(context, message: ApiService.lastError ?? '取消解绑失败');
+      showAppToast(context, message: ApiService.lastError ?? '取消解绑失败');
       return;
     }
     setState(() {

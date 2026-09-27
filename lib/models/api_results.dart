@@ -92,17 +92,20 @@ class SessionValidateResult {
 /// POST /user/profile 返回的用户资料
 class UserProfileResult {
   final String userDisplayId;
+  final String? avatarUrl;
   final DateTime? displayIdChangedAt;
   final DateTime? tokenResetAt;
 
   const UserProfileResult({
     required this.userDisplayId,
+    this.avatarUrl,
     this.displayIdChangedAt,
     this.tokenResetAt,
   });
 
   factory UserProfileResult.fromJson(Map<String, dynamic> json) {
     return UserProfileResult(
+      avatarUrl: json['avatar_url'] as String?,
       userDisplayId: json['user_display_id'] as String? ?? '',
       displayIdChangedAt: TimezoneService.parseServerDateTime(
         json['display_id_changed_at'],

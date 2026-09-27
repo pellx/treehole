@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:open_filex/open_filex.dart';
 
 import '../../models/version_info.dart';
+import '../../widgets/app_toast.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens.dart';
 import '../../theme/app_dimens_accent.dart';
@@ -49,9 +50,7 @@ class _VersionDetailPageState extends State<VersionDetailPage> {
 
   void _toast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
-    );
+    showAppToast(context, message: message, duration: const Duration(seconds: 5));
   }
 
   Future<bool> _ensureInstallAllowed() async {

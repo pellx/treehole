@@ -10,6 +10,8 @@ class AppBottomNav extends StatelessWidget {
   currentIndex; // 0..3 对应 [labels[0], labels[1], labels[2], labels[3]]
   final ValueChanged<int> onTap;
   final VoidCallback onPublishTap;
+  final int unreadCount;
+  final bool hasUnread;
   final List<String> labels; // 长度固定为 4
 
   const AppBottomNav({
@@ -18,6 +20,8 @@ class AppBottomNav extends StatelessWidget {
     required this.onTap,
     required this.onPublishTap,
     required this.labels,
+    this.unreadCount = 0,
+    this.hasUnread = false,
   }) : assert(labels.length == 4);
 
   @override
@@ -64,18 +68,40 @@ class AppBottomNav extends StatelessWidget {
           onTap(logicalIndex);
         },
         child: Center(
-          child: Text(
-            label,
-            style: TextStyle(
-              fontSize: AppBottomNavTheme.labelFontSize,
-              fontWeight: AppBottomNavTheme.labelFontWeight,
-              color: selected
-                  ? (isLight
-                        ? AppBottomNavTheme.selectedLabelLight
-                        : AppBottomNavTheme.selectedLabelDark)
-                  : (isLight
-                        ? AppBottomNavTheme.unselectedLabelLight
-                        : AppBottomNavTheme.unselectedLabelDark),
+          child: Badge(
+            alignment: AppBottomNavTheme.messageBadgeAlignment,
+            largeSize: unreadCount > 0
+                ? AppBottomNavTheme.messageBadgeSize
+                : AppBottomNavTheme.messageBadgeDotSize,
+            textStyle: const TextStyle(
+              fontSize: AppBottomNavTheme.messageBadgeFontSize,
+            ),
+            padding: unreadCount > 0
+                ? const EdgeInsets.symmetric(
+                    horizontal: AppBottomNavTheme.messageBadgeHorizontalPadding,
+                  )
+                : EdgeInsets.zero,
+            offset: const Offset(
+              AppBottomNavTheme.messageBadgeOffsetX,
+              AppBottomNavTheme.messageBadgeOffsetY,
+            ),
+            isLabelVisible: logicalIndex == 2 && (unreadCount > 0 || hasUnread),
+            label: unreadCount > 0
+                ? Text(unreadCount > 99 ? '99+' : unreadCount.toString())
+                : const SizedBox.shrink(),
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: AppBottomNavTheme.labelFontSize,
+                fontWeight: AppBottomNavTheme.labelFontWeight,
+                color: selected
+                    ? (isLight
+                          ? AppBottomNavTheme.selectedLabelLight
+                          : AppBottomNavTheme.selectedLabelDark)
+                    : (isLight
+                          ? AppBottomNavTheme.unselectedLabelLight
+                          : AppBottomNavTheme.unselectedLabelDark),
+              ),
             ),
           ),
         ),

@@ -64,7 +64,7 @@ theme/
 
 | 类型 | 规则 | 示例 |
 |------|------|------|
-| 通用组件 | `app_<name>.dart` | `app_app_bar.dart`、`app_snackbar.dart` |
+| 通用组件 | `app_<name>.dart` | `app_app_bar.dart`、`app_toast.dart` |
 | 领域组件 | `<domain>.dart` | `post_card.dart`、`device_card.dart` |
 | 页面 | `<feature>_page.dart` | `square_page.dart`、`user_page.dart` |
 | 模型 | `<entity>.dart` | `post.dart`、`bound_device.dart` |
@@ -80,6 +80,96 @@ theme/
 - API 结果类统一后缀 `Result`：`RegisterResult`、`LoginResult`、`BoundDevicesResult`
 - Widget 数据类后缀 `Data`：`AccountCardData`、`DeviceCardData`
 
+## 弹窗、提示与加载状态规范
+
+信息提示统一为以下两类：
+
+- **中部大弹窗**：重要说明、需要用户确认的操作，例如清除数据、解绑设备、退出登录。普通确认优先复用 `showAppConfirmDialog`（`lib/widgets/app_confirm_dialog.dart`）；确需自定义内容时沿用现有中部 Dialog 样式。
+- **页面下半部小 Toast**：刷新、复制、保存、上传等普通反馈，例如“已刷新该帖子”。统一调用 `showAppToast`（`lib/widgets/app_toast.dart`）。头像上传进度、审核结果、成功和失败信息都使用这一类。
+
+**加载信息不得混入页面文档流。** 加载、上传、审核等临时状态应通过浮层提示显示，不在页面的 Row、Column、ListView 等布局中新增提示文字、进度组件或占位间距，不让原有内容移动、增高或闪动。禁止恢复头像下方的“上传并审核中”等小字。
+
+不要新增第三种信息提示样式，不使用系统 `ScaffoldMessenger.showSnackBar`。旧的 `showAppSnackBar` 和 `app_snackbar.dart` 已移除。底部操作菜单、图片预览和评论输入浮层属于交互面板，继续使用各自组件，不作为普通信息提示入口。
+
+### 重要内容：中部确认弹窗
+
+```dart
+import 'package:treehole/widgets/app_confirm_dialog.dart';
+
+final confirmed = await showAppConfirmDialog(
+  context,
+  title: '清除数据',
+  message: '确认清除本机数据？',
+  cancelText: '取消',
+  confirmText: '确认清除',
+);
+if (!context.mounted || confirmed != true) return;
+// 执行已确认的操作。
+```
+
+返回 `true` 表示确认，`false` 表示取消，`null` 表示关闭。此组件使用 App 主题及现有弹窗尺寸配置。
+
+### 普通反馈：下半部小提示
+
+```dart
+import 'package:treehole/widgets/app_toast.dart';
+
+showAppToast(context, message: '已刷新该帖子');
+
+showAppToast(
+  context,
+  message: '头像已通过审核并更新',
+  duration: const Duration(seconds: 3),
+);
+```
+
+- 默认显示 1500 毫秒；可通过 `duration` 调整。
+- 使用 OverlayEntry 浮层，不占用页面布局；IgnorePointer 保证提示本身不拦截点击。
+- 同一 Overlay 同时只显示一条小提示，新提示替换旧提示。
+- 返回一个可重复调用的关闭函数；旧提示的关闭函数不会误关新提示。
+- 异步操作后显示提示前，必须检查页面或 context 是否仍然 mounted。
+
+### 上传、审核等耗时操作
+
+开始时显示小 Toast，结束时主动关闭，再显示结果。以下示例放在页面 State 中：
+
+```dart
+VoidCallback? _dismissProgress;
+bool _uploading = false;
+
+Future<void> runAvatarUpload(Future<void> Function() upload) async {
+  if (_uploading) return;
+  _uploading = true;
+  final dismiss = showAppToast(
+    context,
+    message: '正在上传并审核…',
+    duration: const Duration(seconds: 90),
+  );
+  _dismissProgress = dismiss;
+  var message = '头像已通过审核并更新';
+  try {
+    await upload(); // 请求应有超时；业务失败也必须传回失败结果。
+  } catch (_) {
+    message = '头像上传失败，请稍后重试';
+  } finally {
+    dismiss();
+    if (_dismissProgress == dismiss) _dismissProgress = null;
+    _uploading = false;
+  }
+  if (!mounted) return;
+  showAppToast(context, message: message);
+}
+
+@override
+void dispose() {
+  _dismissProgress?.call();
+  super.dispose();
+}
+```
+
+Toast 不阻止重复操作，业务层仍需使用忙碌标记避免重复提交。切换账号时也应关闭旧进度提示，并防止旧请求结果覆盖新账号。实际头像流程见 `lib/pages/account/user_page.dart`。
+
+修改小提示行为后，可运行 `flutter test test/app_toast_test.dart`，验证下半部位置、页面布局不变、提示替换和关闭行为。
 ## 核心模式
 
 ### 模型类（Model）

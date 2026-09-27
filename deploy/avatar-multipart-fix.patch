@@ -1,0 +1,25 @@
+diff --git a/src/user/user.controller.ts b/src/user/user.controller.ts
+index 205c87d..d85dcb9 100644
+--- a/src/user/user.controller.ts
++++ b/src/user/user.controller.ts
+@@ -1,7 +1,7 @@
+ import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, UnauthorizedException, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+ import type { Request } from 'express';
+ import { FileInterceptor } from '@nestjs/platform-express';
+-import { memoryStorage } from 'multer';
++import { avatarUploadOptions } from './avatar-upload.options';
+ import { UserAvatarService } from './user-avatar.service';
+ import { CheckLoginDto } from './dto/check.dto';
+ import { RegisterDto } from './dto/register.dto';
+@@ -154,10 +154,7 @@ export class UserController {
+   @Post('avatar')
+   @HttpCode(HttpStatus.OK)
+   @UseGuards(SessionGuard)
+-  @UseInterceptors(FileInterceptor('file', {
+-    storage: memoryStorage(),
+-    limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0, parts: 1 },
+-  }))
++  @UseInterceptors(FileInterceptor('file', avatarUploadOptions))
+   async uploadAvatar(
+     @UploadedFile() file: Express.Multer.File | undefined,
+     @Req() req: Request & { user_id: number },

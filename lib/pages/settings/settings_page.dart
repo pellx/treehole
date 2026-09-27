@@ -6,7 +6,7 @@ import '../../theme/app_dimens.dart';
 import '../../theme/app_dimens_accent.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_confirm_dialog.dart';
-import '../../widgets/app_snackbar.dart';
+import '../../widgets/app_toast.dart';
 import 'notification_settings_page.dart';
 import 'privacy_policy_page.dart';
 import 'settings_navigation.dart';
@@ -33,7 +33,7 @@ class _SettingsPageState extends State<SettingsPage> {
       confirmText: '确认',
     );
     if (confirmed == true && mounted) {
-      showAppSnackBar(
+      showAppToast(
         context,
         message: '本地数据清理功能即将上线',
         duration: const Duration(seconds: 2),

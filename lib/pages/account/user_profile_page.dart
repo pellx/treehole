@@ -3,17 +3,18 @@ import 'package:flutter/services.dart';
 
 import '../../theme/app_colors.dart';
 import '../../widgets/app_app_bar.dart';
-import '../../widgets/app_snackbar.dart';
+import '../../widgets/app_toast.dart';
+import '../../widgets/user_avatar.dart';
 
 /// 用户信息详情页
 class UserProfilePage extends StatelessWidget {
-  final Uint8List? avatarBytes;
+  final String? avatarUrl;
   final String name;
   final String token;
 
   const UserProfilePage({
     super.key,
-    this.avatarBytes,
+    this.avatarUrl,
     required this.name,
     required this.token,
   });
@@ -21,7 +22,7 @@ class UserProfilePage extends StatelessWidget {
   void _copyToken(BuildContext context) {
     if (token.isEmpty) return;
     Clipboard.setData(ClipboardData(text: token));
-    showAppSnackBar(
+    showAppToast(
       context,
       message: '已复制用户令牌',
       duration: const Duration(seconds: 1),
@@ -46,12 +47,10 @@ class UserProfilePage extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
         children: [
           Center(
-            child: CircleAvatar(
+            child: UserAvatar(
+              url: avatarUrl,
               radius: 60,
               backgroundColor: colors.common.idTint.withValues(alpha: 0.2),
-              backgroundImage: avatarBytes != null
-                  ? MemoryImage(avatarBytes!) as ImageProvider
-                  : const AssetImage('assets/420px-Transparent_Akkarin.jpg'),
             ),
           ),
           const SizedBox(height: 20),

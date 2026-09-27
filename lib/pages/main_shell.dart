@@ -1,3 +1,8 @@
+import 'dart:async';
+import '../services/realtime_service.dart';
+import '../services/dm_inbox.dart';
+import '../services/dm_notifications.dart';
+import '../widgets/app_toast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -18,6 +23,53 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
+  StreamSubscription? _dmSubscription;
+  @override
+  void initState() {
+    super.initState();
+    DmNotifications.onOpenMessages = () {
+      if (!mounted) return;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      setState(() => _currentIndex = 2);
+      DmInbox.refresh();
+    };
+    unawaited(DmNotifications.initialize().catchError((_) {}));
+    RealtimeService.instance.connectionLabel.addListener(_connectionChanged);
+    _dmSubscription = RealtimeService.instance.dmEvents.listen((event) {
+      DmInbox.refresh();
+      if (event.notify &&
+          event.conversationId != null &&
+          !(DmInbox.visibleConversationId == event.conversationId &&
+              WidgetsBinding.instance.lifecycleState ==
+                  AppLifecycleState.resumed)) {
+        unawaited(DmNotifications.show(event.sessionId, event.conversationId!));
+        if (mounted &&
+            _currentIndex != 2 &&
+            WidgetsBinding.instance.lifecycleState ==
+                AppLifecycleState.resumed) {
+          showAppToast(context, message: '收到一条新私信');
+        }
+      }
+    });
+    DmInbox.refresh();
+  }
+
+  void _connectionChanged() {
+    if (RealtimeService.instance.connectionLabel.value == '未连接') {
+      DmInbox.unread.value = 0;
+      DmInbox.hasUnread.value = false;
+      unawaited(DmNotifications.clear());
+    }
+  }
+
+  @override
+  void dispose() {
+    _dmSubscription?.cancel();
+    RealtimeService.instance.connectionLabel.removeListener(_connectionChanged);
+    DmNotifications.onOpenMessages = null;
+    super.dispose();
+  }
+
   int _currentIndex = 0;
   final _homeKey = GlobalKey<SquarePageState>();
   final _favoritesKey = GlobalKey();
@@ -39,6 +91,7 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _onTap(int index) {
+    DmInbox.refresh();
     if (index != _currentIndex) {
       HapticFeedback.lightImpact();
       setState(() => _currentIndex = index);
@@ -50,17 +103,22 @@ class _MainShellState extends State<MainShell> {
     final pages = [
       SquarePage(key: _homeKey),
       FavoritesPage(key: _favoritesKey),
-      MessagesPage(key: _messagesKey),
+      MessagesPage(key: _messagesKey, active: _currentIndex == 2),
       UserPage(key: _userKey),
     ];
 
     return Scaffold(
       body: IndexedStack(index: _currentIndex, children: pages),
-      bottomNavigationBar: AppBottomNav(
-        currentIndex: _currentIndex,
-        onTap: _onTap,
-        onPublishTap: _openCreatePost,
-        labels: _labels,
+      bottomNavigationBar: AnimatedBuilder(
+        animation: Listenable.merge([DmInbox.unread, DmInbox.hasUnread]),
+        builder: (context, _) => AppBottomNav(
+          unreadCount: DmInbox.unread.value,
+          hasUnread: DmInbox.hasUnread.value,
+          currentIndex: _currentIndex,
+          onTap: _onTap,
+          onPublishTap: _openCreatePost,
+          labels: _labels,
+        ),
       ),
     );
   }

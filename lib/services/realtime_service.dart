@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 
@@ -102,6 +103,27 @@ class RealtimeService {
   static const _host = 'https://tree.leisure.xin';
   static const _path = '/node/socket.io';
 
+  /// Authenticated ready/change notifications, scoped to the originating session.
+  final _dmEvents =
+      StreamController<
+        ({int sessionId, int? conversationId, bool notify})
+      >.broadcast();
+  Stream<({int sessionId, int? conversationId, bool notify})> get dmEvents =>
+      _dmEvents.stream;
+
+  @visibleForTesting
+  void debugDmEvent({
+    required int sessionId,
+    int? conversationId,
+    bool notify = false,
+  }) {
+    _dmEvents.add((
+      sessionId: sessionId,
+      conversationId: conversationId,
+      notify: false,
+    ));
+  }
+
   io.Socket? _socket;
   int? _connectedSessionId;
   bool _handlersBound = false;
@@ -110,12 +132,10 @@ class RealtimeService {
   VoidCallback? onSessionInvalidated;
 
   /// UI：连接状态文案（未连接 / 连接中 / 已连接 / 错误…）
-  final ValueNotifier<String> connectionLabel =
-      ValueNotifier<String>('未连接');
+  final ValueNotifier<String> connectionLabel = ValueNotifier<String>('未连接');
 
   /// UI：最近一次 `test.tick` 展示文案；未测时为 null
-  final ValueNotifier<String?> lastTestTickLabel =
-      ValueNotifier<String?>(null);
+  final ValueNotifier<String?> lastTestTickLabel = ValueNotifier<String?>(null);
 
   /// UI：是否正在跑连通性测试
   final ValueNotifier<bool> testRunning = ValueNotifier<bool>(false);
@@ -124,10 +144,7 @@ class RealtimeService {
   bool get isTestRunning => testRunning.value;
 
   /// 用当前 session 建连；同 session 已连接则跳过。
-  void connect({
-    required int sessionId,
-    required String sessionSecret,
-  }) {
+  void connect({required int sessionId, required String sessionSecret}) {
     if (sessionSecret.isEmpty) return;
     if (_connectedSessionId == sessionId && isConnected) return;
 
@@ -139,10 +156,7 @@ class RealtimeService {
       _host,
       io.OptionBuilder()
           .setPath(_path)
-          .setAuth({
-            'session_id': sessionId,
-            'session_secret': sessionSecret,
-          })
+          .setAuth({'session_id': sessionId, 'session_secret': sessionSecret})
           .setTransports(['websocket'])
           .enableAutoConnect()
           .enableReconnection()
@@ -175,6 +189,33 @@ class RealtimeService {
       debugPrint('[Realtime] error: $err');
     });
 
+    socket.on('session.ready', (_) {
+      if (_connectedSessionId != boundSessionId) return;
+      _dmEvents.add((
+        sessionId: boundSessionId,
+        conversationId: null,
+        notify: false,
+      ));
+    });
+    socket.on('system.changed', (_) {
+      if (_connectedSessionId != boundSessionId) return;
+      _dmEvents.add((
+        sessionId: boundSessionId,
+        conversationId: 0,
+        notify: false,
+      ));
+    });
+    socket.on('dm.changed', (data) {
+      if (_connectedSessionId != boundSessionId || data is! Map) return;
+      final id = data['conversation_id'];
+      if (id is! int) return;
+      _dmEvents.add((
+        sessionId: boundSessionId,
+        conversationId: id,
+        notify: data['notify'] == true,
+      ));
+    });
+
     socket.on('binding.unbound', (data) {
       if (_connectedSessionId != boundSessionId) return;
       debugPrint('[Realtime] binding.unbound: $data');
@@ -189,8 +230,9 @@ class RealtimeService {
       if (_connectedSessionId != boundSessionId) return;
       final n = _readTickN(data);
       final at = _readTickAt(data);
-      lastTestTickLabel.value =
-          n == null ? '收到 tick（解析失败）' : 'n=$n${at != null ? '  $at' : ''}';
+      lastTestTickLabel.value = n == null
+          ? '收到 tick（解析失败）'
+          : 'n=$n${at != null ? '  $at' : ''}';
       debugPrint('[Realtime] test.tick: $data');
     });
   }

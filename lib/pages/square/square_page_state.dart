@@ -598,12 +598,12 @@ mixin SquarePageStateMixin on State<SquarePage> {
       fresh = null;
     }
     if (fresh == null) {
-      if (mounted) showAppSnackBar(context, message: '刷新失败，请检查网络');
+      if (mounted) showAppToast(context, message: '刷新失败，请检查网络');
       return;
     }
     await PostStorage.savePost(fresh);
     _replaceLoadedPost(fresh);
     await _refreshPostComments(fresh, fetchLatest: false);
-    if (mounted) showAppSnackBar(context, message: '已刷新该帖子');
+    if (mounted) showAppToast(context, message: '已刷新该帖子');
   }
 }

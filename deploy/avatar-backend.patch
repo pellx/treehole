@@ -1,0 +1,602 @@
+diff --git a/database/migrations/20260927_add_user_avatar.sql b/database/migrations/20260927_add_user_avatar.sql
+new file mode 100644
+index 0000000..e7782e5
+--- /dev/null
++++ b/database/migrations/20260927_add_user_avatar.sql
+@@ -0,0 +1,2 @@
++ALTER TABLE users
++  ADD COLUMN avatar_filename VARCHAR(64) NULL DEFAULT NULL;
+diff --git a/scripts/apply-avatar-migration.cjs b/scripts/apply-avatar-migration.cjs
+new file mode 100644
+index 0000000..f33afab
+--- /dev/null
++++ b/scripts/apply-avatar-migration.cjs
+@@ -0,0 +1,32 @@
++const fs = require('node:fs/promises');
++const path = require('node:path');
++const mysql = require('mysql2/promise');
++
++async function main() {
++  for (const key of ['DB_HOST', 'DB_USERNAME', 'DB_NAME']) {
++    if (!process.env[key]) throw new Error('Missing environment variable: ' + key);
++  }
++  const connection = await mysql.createConnection({
++    host: process.env.DB_HOST, port: Number(process.env.DB_PORT) || 3306,
++    user: process.env.DB_USERNAME, password: process.env.DB_PASSWORD,
++    database: process.env.DB_NAME,
++  });
++  try {
++    const [columns] = await connection.query(
++      "SELECT DATA_TYPE, CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'avatar_filename'",
++    );
++    if (columns.length) {
++      const column = columns[0];
++      if (column.DATA_TYPE !== 'varchar' || Number(column.CHARACTER_MAXIMUM_LENGTH) < 64 || column.IS_NULLABLE !== 'YES') {
++        throw new Error('Existing avatar_filename schema differs; inspect it before continuing.');
++      }
++      console.log('Avatar column already exists; skipped.');
++      return;
++    }
++    await connection.query(await fs.readFile(path.join(__dirname, '..', 'database', 'migrations', '20260927_add_user_avatar.sql'), 'utf8'));
++    console.log('Avatar migration applied.');
++  } finally {
++    await connection.end();
++  }
++}
++main().catch((error) => { console.error('Avatar migration failed:', error.message); process.exitCode = 1; });
+diff --git a/src/moderation/moderation.service.ts b/src/moderation/moderation.service.ts
+index 2023fc3..e64443f 100644
+--- a/src/moderation/moderation.service.ts
++++ b/src/moderation/moderation.service.ts
+@@ -133,16 +133,18 @@ export class ModerationService {
+   /**
+    * 审核图片（仅阿里云审核；LLM 二次审核已临时关闭）
+    */
+-  async moderateImage(filePath: string): Promise<ModerationResult> {
+-    return this.moderateImageWithAliyun(filePath);
++  async moderateImage(filePath: string, required = false): Promise<ModerationResult> {
++    return this.moderateImageWithAliyun(filePath, required);
+   }
+ 
+   /**
+    * 阿里云图片审核
+    */
+-  private async moderateImageWithAliyun(filePath: string): Promise<ModerationResult> {
++  private async moderateImageWithAliyun(filePath: string, required = false): Promise<ModerationResult> {
+     if (!this.enabled || !this.client) {
+-      return { passed: true };
++      return required
++        ? { passed: false, reason: '图片审核服务未启用，请稍后重试' }
++        : { passed: true };
+     }
+ 
+     try {
+@@ -163,6 +165,12 @@ export class ModerationService {
+       }
+ 
+       const results = response.body?.data?.result || [];
++      if (required && (!Array.isArray(results) || results.length === 0 ||
++          results.some((result) => !result || typeof result.label !== 'string' || !result.label.trim() ||
++            (result.label !== 'nonLabel' && !Number.isFinite(result.confidence))))) {
++        this.logger.warn('图片审核返回结构异常，已拦截；requestId=' + response.body?.requestId);
++        return { passed: false, reason: '图片审核结果异常，请稍后重试' };
++      }
+       const { confidenceThreshold, blockLabels, ignoreLabels } = MODERATION_CONFIG.image;
+ 
+       const hitLabels: LabelResult[] = [];
+diff --git a/src/user/avatar-image.processor.spec.ts b/src/user/avatar-image.processor.spec.ts
+new file mode 100644
+index 0000000..42ce219
+--- /dev/null
++++ b/src/user/avatar-image.processor.spec.ts
+@@ -0,0 +1,45 @@
++import { BadRequestException } from '@nestjs/common';
++import { AvatarImageProcessor } from './avatar-image.processor';
++import { execFile } from 'node:child_process';
++
++jest.mock('node:child_process', () => ({ execFile: jest.fn() }));
++
++describe('avatar image validation', () => {
++  const jpeg = Buffer.from([255, 216, 255, 0]);
++  beforeEach(() => {
++    (execFile as unknown as jest.Mock).mockImplementation((_file, args, _options, callback) => {
++      callback(null, { stdout: args[0] === '-f' ? '512\n' : '100\n' });
++    });
++  });
++
++  it('rejects other formats without launching the decoder', async () => {
++    (execFile as unknown as jest.Mock).mockClear();
++    await expect(new AvatarImageProcessor().validate(Buffer.from('not jpeg')))
++      .rejects.toBeInstanceOf(BadRequestException);
++    expect(execFile).not.toHaveBeenCalled();
++  });
++
++  it('validates a JPEG without replacing its bytes', async () => {
++    const before = Buffer.from(jpeg);
++    await expect(new AvatarImageProcessor().validate(jpeg)).resolves.toBeUndefined();
++    expect(jpeg).toEqual(before);
++    expect(execFile).toHaveBeenCalledWith('vips',
++      expect.arrayContaining(['avg', expect.stringContaining('[fail-on=warning]')]),
++      expect.anything(), expect.any(Function));
++  });
++
++  it('rejects a nonstandard size', async () => {
++    (execFile as unknown as jest.Mock).mockImplementation((_file, _args, _options, callback) => {
++      callback(null, { stdout: '256\n' });
++    });
++    await expect(new AvatarImageProcessor().validate(jpeg))
++      .rejects.toThrow('512×512');
++  });
++
++  it('rejects a JPEG that fails full decoding', async () => {
++    (execFile as unknown as jest.Mock).mockImplementation((_file, args, _options, callback) => {
++      callback(args[0] === 'avg' ? new Error('corrupt jpeg') : null, { stdout: '512\n' });
++    });
++    await expect(new AvatarImageProcessor().validate(jpeg)).rejects.toThrow('头像文件无效');
++  });
++});
+\ No newline at end of file
+diff --git a/src/user/avatar-image.processor.ts b/src/user/avatar-image.processor.ts
+new file mode 100644
+index 0000000..7bde815
+--- /dev/null
++++ b/src/user/avatar-image.processor.ts
+@@ -0,0 +1,42 @@
++import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
++import { execFile } from 'node:child_process';
++import { mkdtemp, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { promisify } from 'node:util';
++
++const execute = promisify(execFile);
++
++@Injectable()
++export class AvatarImageProcessor {
++  // Validate the client-produced image without changing its bytes.
++  async validate(buffer: Buffer): Promise<void> {
++    if (buffer[0] !== 255 || buffer[1] !== 216 || buffer[2] !== 255) {
++      throw new BadRequestException('头像必须为裁剪后的 512×512 JPEG 图片');
++    }
++    const directory = await mkdtemp(join(tmpdir(), 'treehole-avatar-'));
++    try {
++      const source = join(directory, 'avatar.jpg');
++      await writeFile(source, buffer, { mode: 0o600 });
++      const dimensions = await Promise.all(['width', 'height'].map(async (field) => {
++        const { stdout } = await execute('vipsheader', ['-f', field, source], { timeout: 10000 });
++        return Number(stdout.trim());
++      }));
++      if (dimensions[0] !== 512 || dimensions[1] !== 512) {
++        throw new BadRequestException('头像尺寸必须为 512×512，请在客户端重新裁剪');
++      }
++      // Force full decoding and reject corrupt/truncated JPEGs; no output file.
++      await execute('vips', ['avg', source + '[fail-on=warning]'], {
++        timeout: 15000, maxBuffer: 1024 * 1024,
++      });
++    } catch (error) {
++      if (error instanceof BadRequestException) throw error;
++      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
++        throw new ServiceUnavailableException('头像校验服务暂时不可用');
++      }
++      throw new BadRequestException('头像文件无效，请在客户端重新裁剪');
++    } finally {
++      await rm(directory, { recursive: true, force: true });
++    }
++  }
++}
+\ No newline at end of file
+diff --git a/src/user/avatar-moderation-result.spec.ts b/src/user/avatar-moderation-result.spec.ts
+new file mode 100644
+index 0000000..643ac34
+--- /dev/null
++++ b/src/user/avatar-moderation-result.spec.ts
+@@ -0,0 +1,34 @@
++import { ConfigService } from '@nestjs/config';
++import { ModerationService } from '../moderation/moderation.service';
++
++describe('strict avatar moderation responses', () => {
++  function moderation(result: unknown) {
++    const service = new ModerationService(new ConfigService({ MODERATION_ENABLED: 'false' }));
++    (service as any).enabled = true;
++    (service as any).client = {
++      imageModeration: jest.fn(async () => ({ body: { code: 200, data: { result } } })),
++    };
++    return service;
++  }
++
++  it('accepts the documented nonLabel response without confidence', async () => {
++    await expect(moderation([{ label: 'nonLabel' }]).moderateImage('/var/www/img/test.jpg', true))
++      .resolves.toMatchObject({ passed: true });
++  });
++
++  it('rejects a risk label without confidence', async () => {
++    await expect(moderation([{ label: 'pornographic_adultContent' }]).moderateImage('/var/www/img/test.jpg', true))
++      .resolves.toMatchObject({ passed: false, reason: '图片审核结果异常，请稍后重试' });
++  });
++
++  it('still rejects high confidence risk labels alongside nonLabel', async () => {
++    await expect(moderation([
++      { label: 'nonLabel' }, { label: 'pornographic_adultContent', confidence: 99 },
++    ]).moderateImage('/var/www/img/test.jpg', true)).resolves.toMatchObject({ passed: false });
++  });
++
++  it.each([{ result: [] }, { result: [null] }, { result: [{ label: '' }] }])('rejects malformed results %j', async ({ result }) => {
++    await expect(moderation(result).moderateImage('/var/www/img/test.jpg', true))
++      .resolves.toMatchObject({ passed: false });
++  });
++});
+\ No newline at end of file
+diff --git a/src/user/avatar-upload.options.spec.ts b/src/user/avatar-upload.options.spec.ts
+new file mode 100644
+index 0000000..559156f
+--- /dev/null
++++ b/src/user/avatar-upload.options.spec.ts
+@@ -0,0 +1,44 @@
++import express from 'express';
++import type { Request, Response, NextFunction } from 'express';
++import multer from 'multer';
++import request from 'supertest';
++import { avatarUploadOptions } from './avatar-upload.options';
++
++describe('avatar multipart limits', () => {
++  function app(options = avatarUploadOptions) {
++    const server = express();
++    server.post('/avatar', multer(options).single('file'), (req, res) => {
++      res.json({ bytes: req.file?.buffer.length });
++    });
++    server.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
++      res.status(400).json({ code: error.code });
++    });
++    return server;
++  }
++  it('reproduces the old parts: 1 failure for one valid file', async () => {
++    const result = await request(app({
++      ...avatarUploadOptions, limits: { ...avatarUploadOptions.limits, parts: 1 },
++    })).post('/avatar').attach('file', Buffer.from('jpeg'), 'avatar.jpg');
++    expect(result.body.code).toBe('LIMIT_PART_COUNT');
++  });
++  it('accepts a single file with the current options', async () => {
++    const result = await request(app()).post('/avatar').attach('file', Buffer.from('jpeg'), 'avatar.jpg');
++    expect(result.status).toBe(200);
++    expect(result.body.bytes).toBe(4);
++  });
++  it('rejects a second file', async () => {
++    const result = await request(app()).post('/avatar')
++      .attach('file', Buffer.from('a'), 'a.jpg').attach('file', Buffer.from('b'), 'b.jpg');
++    expect(result.body.code).toBe('LIMIT_FILE_COUNT');
++  });
++  it('rejects additional form fields', async () => {
++    const result = await request(app()).post('/avatar').field('extra', 'x')
++      .attach('file', Buffer.from('jpeg'), 'avatar.jpg');
++    expect(result.body.code).toBe('LIMIT_FIELD_COUNT');
++  });
++  it('rejects files larger than 5MB', async () => {
++    const result = await request(app()).post('/avatar')
++      .attach('file', Buffer.alloc(5 * 1024 * 1024 + 1), 'avatar.jpg');
++    expect(result.body.code).toBe('LIMIT_FILE_SIZE');
++  });
++});
+\ No newline at end of file
+diff --git a/src/user/avatar-upload.options.ts b/src/user/avatar-upload.options.ts
+new file mode 100644
+index 0000000..a36adb8
+--- /dev/null
++++ b/src/user/avatar-upload.options.ts
+@@ -0,0 +1,9 @@
++import { memoryStorage } from 'multer';
++import type { Options } from 'multer';
++
++export const avatarUploadOptions: Options = {
++  storage: memoryStorage(),
++  // Busboy emits partsLimit when the count reaches the limit, including the
++  // first valid file for parts: 1. files/fields enforce the intended shape.
++  limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0 },
++};
+\ No newline at end of file
+diff --git a/src/user/entities/user.entity.ts b/src/user/entities/user.entity.ts
+index 315cf2e..2bcbf77 100644
+--- a/src/user/entities/user.entity.ts
++++ b/src/user/entities/user.entity.ts
+@@ -15,6 +15,10 @@ export class UserEntity {
+   @Column({ type: 'varchar', length: 100, nullable: true, default: null })
+   user_display_id: string;
+ 
++  /** Only approved, server-generated avatar filenames are stored here. */
++  @Column({ type: 'varchar', length: 64, nullable: true, default: null })
++  avatar_filename: string | null;
++
+   @Index('uk_users_phone', { unique: true })
+   @Column({ type: 'varchar', length: 20, nullable: true, default: null })
+   phone: string | null;
+diff --git a/src/user/user-avatar.service.spec.ts b/src/user/user-avatar.service.spec.ts
+new file mode 100644
+index 0000000..5739e32
+--- /dev/null
++++ b/src/user/user-avatar.service.spec.ts
+@@ -0,0 +1,96 @@
++import { BadRequestException } from '@nestjs/common';
++import { ConfigService } from '@nestjs/config';
++import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
++import { tmpdir } from 'node:os';
++import { join } from 'node:path';
++import { ModerationService } from '../moderation/moderation.service';
++import { UserAvatarService } from './user-avatar.service';
++
++describe('approved avatar publication', () => {
++  let root: string;
++  let service: UserAvatarService;
++  let current: string | null;
++  let update: jest.Mock;
++  let moderateImage: jest.Mock;
++  let validate: jest.Mock;
++  let transaction: jest.Mock;
++  const previous = '11111111-1111-4111-8111-111111111111.webp';
++  const file = { buffer: Buffer.from('upload') } as Express.Multer.File;
++
++  beforeEach(async () => {
++    root = await mkdtemp(join(tmpdir(), 'avatar-test-'));
++    await mkdir(join(root, 'icons'));
++    current = previous;
++    await writeFile(join(root, 'icons', previous), 'previous approved image');
++    update = jest.fn(async (_where, value) => { current = value.avatar_filename; });
++    const repository = { findOne: jest.fn(async () => ({ avatar_filename: current })), update };
++    transaction = jest.fn(async (fn) => fn({ getRepository: () => repository }));
++    moderateImage = jest.fn(async () => ({ passed: true }));
++    validate = jest.fn(async () => undefined);
++    service = new UserAvatarService(
++      { manager: { transaction } } as any,
++      { moderateImage } as any, { validate } as any,
++      { client: { set: jest.fn(async () => 'OK') } } as any,
++      new ConfigService({ AVATAR_STORAGE_DIR: join(root, 'icons'), AVATAR_REVIEW_DIR: join(root, 'review') }),
++    );
++  });
++  afterEach(async () => { await rm(root, { recursive: true, force: true }); });
++
++  it('reviews uploaded bytes before publishing and removes the old approved image', async () => {
++    moderateImage.mockImplementation(async (path, required) => {
++      expect(required).toBe(true);
++      expect(await readFile(path, 'utf8')).toBe('upload');
++      expect(await readdir(join(root, 'icons'))).toEqual([previous]);
++      expect(update).not.toHaveBeenCalled();
++      return { passed: true };
++    });
++    const result = await service.upload(7, file);
++    expect(result.avatar_url).toBe('https://www.leisure.xin:33433/user-icon/' + current);
++    expect(await readdir(join(root, 'icons'))).toEqual([current]);
++    expect(await readdir(join(root, 'review'))).toEqual([]);
++  });
++
++  it('keeps the current avatar and deletes review files when moderation rejects', async () => {
++    moderateImage.mockResolvedValue({ passed: false, reason: '图片审核未通过' });
++    await expect(service.upload(7, file)).rejects.toThrow('图片审核未通过');
++    expect(update).not.toHaveBeenCalled();
++    expect(await readdir(join(root, 'icons'))).toEqual([previous]);
++    expect(await readdir(join(root, 'review'))).toEqual([]);
++  });
++
++  it('does not publish when moderation is unavailable', async () => {
++    moderateImage.mockRejectedValue(new Error('upstream unavailable'));
++    await expect(service.upload(7, file)).rejects.toThrow();
++    expect(update).not.toHaveBeenCalled();
++    expect(await readdir(join(root, 'icons'))).toEqual([previous]);
++    expect(await readdir(join(root, 'review'))).toEqual([]);
++  });
++
++  it('removes the newly approved file if the database transaction fails', async () => {
++    transaction.mockRejectedValue(new Error('database unavailable'));
++    await expect(service.upload(7, file)).rejects.toThrow('database unavailable');
++    expect(await readdir(join(root, 'icons'))).toEqual([previous]);
++    expect(await readdir(join(root, 'review'))).toEqual([]);
++  });
++
++  it('rejects missing and oversized files before validation', async () => {
++    await expect(service.upload(7, undefined)).rejects.toBeInstanceOf(BadRequestException);
++    await expect(service.upload(7, { buffer: Buffer.alloc(5 * 1024 * 1024 + 1) } as Express.Multer.File))
++      .rejects.toBeInstanceOf(BadRequestException);
++    expect(validate).not.toHaveBeenCalled();
++  });
++
++  it('strict image moderation fails closed when the provider is disabled', async () => {
++    const moderation = new ModerationService(new ConfigService({ MODERATION_ENABLED: 'false' }));
++    await expect(moderation.moderateImage('unused', true))
++      .resolves.toMatchObject({ passed: false });
++  });
++
++  it('strict image moderation rejects a malformed success response', async () => {
++    const moderation = new ModerationService(new ConfigService({ MODERATION_ENABLED: 'false' }));
++    (moderation as any).enabled = true;
++    (moderation as any).client = { imageModeration: jest.fn(async () => ({ body: { code: 200, data: {} } })) };
++    await expect(moderation.moderateImage('/var/www/img/pre-upload/avatar-review/x.webp', true))
++      .resolves.toMatchObject({ passed: false });
++  });
++});
+diff --git a/src/user/user-avatar.service.ts b/src/user/user-avatar.service.ts
+new file mode 100644
+index 0000000..727069a
+--- /dev/null
++++ b/src/user/user-avatar.service.ts
+@@ -0,0 +1,87 @@
++import { BadRequestException, HttpException, HttpStatus, Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
++import { ConfigService } from '@nestjs/config';
++import { InjectRepository } from '@nestjs/typeorm';
++import { randomUUID } from 'node:crypto';
++import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
++import { join } from 'node:path';
++import { Repository } from 'typeorm';
++import { ModerationService } from '../moderation/moderation.service';
++import { RedisService } from '../redis/redis.service';
++import { UserEntity } from './entities/user.entity';
++import { AvatarImageProcessor } from './avatar-image.processor';
++
++@Injectable()
++export class UserAvatarService {
++  private readonly logger = new Logger(UserAvatarService.name);
++  private readonly storageDir: string;
++  private readonly reviewDir: string;
++  private readonly publicBase: string;
++
++  constructor(
++    @InjectRepository(UserEntity) private readonly users: Repository<UserEntity>,
++    private readonly moderation: ModerationService,
++    private readonly processor: AvatarImageProcessor,
++    private readonly redis: RedisService,
++    config: ConfigService,
++  ) {
++    this.storageDir = config.get<string>('AVATAR_STORAGE_DIR') || '/var/www/img/user-icon';
++    this.reviewDir = config.get<string>('AVATAR_REVIEW_DIR') || '/var/www/img/pre-upload/avatar-review';
++    this.publicBase = (config.get<string>('IMG_BASE_URL') || 'https://www.leisure.xin:33433').replace(/\/$/, '');
++  }
++
++  getUrl(filename: string | null | undefined): string | null {
++    return filename && /^[0-9a-f-]{36}\.(?:jpg|webp)$/.test(filename)
++      ? this.publicBase + '/user-icon/' + filename : null;
++  }
++
++  private async remove(path: string) {
++    await rm(path, { force: true }).catch((error) => {
++      this.logger.warn('Avatar file cleanup failed: ' + error.message);
++    });
++  }
++
++  async upload(userId: number, file: Express.Multer.File | undefined) {
++    if (!file?.buffer?.length) throw new BadRequestException('请选择头像图片');
++    if (file.buffer.length > 5 * 1024 * 1024) throw new BadRequestException('头像不能超过 5MB');
++    const allowed = await this.redis.client.set('avatar:upload:' + userId, '1', 'EX', 10, 'NX');
++    if (!allowed) throw new HttpException('头像上传过于频繁，请稍后重试', HttpStatus.TOO_MANY_REQUESTS);
++
++    await this.processor.validate(file.buffer);
++    const filename = randomUUID() + '.jpg';
++    const reviewPath = join(this.reviewDir, filename);
++    const finalPath = join(this.storageDir, filename);
++    let published = false;
++    let moved = false;
++    try {
++      await mkdir(this.reviewDir, { recursive: true });
++      await mkdir(this.storageDir, { recursive: true });
++      // Aliyun's existing URL review needs a short-lived, unlinked review file.
++      await writeFile(reviewPath, file.buffer, { flag: 'wx', mode: 0o644 });
++      let timeout: ReturnType<typeof setTimeout> | undefined;
++      const result = await Promise.race([
++        this.moderation.moderateImage(reviewPath, true),
++        new Promise<never>((_, reject) => {
++          timeout = setTimeout(() => reject(new ServiceUnavailableException('头像审核超时，请稍后重试')), 45000);
++        }),
++      ]).finally(() => clearTimeout(timeout));
++      if (!result.passed) throw new BadRequestException(result.reason || '头像审核未通过');
++      await rename(reviewPath, finalPath);
++      moved = true;
++      const previous = await this.users.manager.transaction(async (manager) => {
++        const repository = manager.getRepository(UserEntity);
++        const user = await repository.findOne({
++          where: { user_id: userId }, lock: { mode: 'pessimistic_write' },
++        });
++        if (!user) throw new UnauthorizedException('USER_NOT_FOUND');
++        await repository.update({ user_id: userId }, { avatar_filename: filename });
++        return user.avatar_filename;
++      });
++      published = true;
++      if (previous && this.getUrl(previous)) await this.remove(join(this.storageDir, previous));
++      return { avatar_url: this.getUrl(filename) };
++    } finally {
++      await this.remove(reviewPath);
++      if (moved && !published) await this.remove(finalPath);
++    }
++  }
++}
+diff --git a/src/user/user.controller.ts b/src/user/user.controller.ts
+index bc1fccf..d85dcb9 100644
+--- a/src/user/user.controller.ts
++++ b/src/user/user.controller.ts
+@@ -1,5 +1,8 @@
+-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
++import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query, Req, UnauthorizedException, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+ import type { Request } from 'express';
++import { FileInterceptor } from '@nestjs/platform-express';
++import { avatarUploadOptions } from './avatar-upload.options';
++import { UserAvatarService } from './user-avatar.service';
+ import { CheckLoginDto } from './dto/check.dto';
+ import { RegisterDto } from './dto/register.dto';
+ import { RegisterV2Dto } from './dto/register-v2.dto';
+@@ -27,6 +30,7 @@ import { UserService } from './user.service';
+ export class UserController {
+   constructor(
+     private readonly userService: UserService,
++    private readonly userAvatarService: UserAvatarService,
+     private readonly userLoginService: UserLoginService,
+     private readonly userProfileService: UserProfileService,
+     private readonly userBindingService: UserBindingService,
+@@ -147,6 +151,17 @@ export class UserController {
+ 
+   // ── 账户资料 ──
+ 
++  @Post('avatar')
++  @HttpCode(HttpStatus.OK)
++  @UseGuards(SessionGuard)
++  @UseInterceptors(FileInterceptor('file', avatarUploadOptions))
++  async uploadAvatar(
++    @UploadedFile() file: Express.Multer.File | undefined,
++    @Req() req: Request & { user_id: number },
++  ) {
++    return this.userAvatarService.upload(req.user_id, file);
++  }
++
+   @Post('profile')
+   @HttpCode(HttpStatus.OK)
+   @UseGuards(SessionGuard)
+diff --git a/src/user/user.module.ts b/src/user/user.module.ts
+index 204ea10..cf84f39 100755
+--- a/src/user/user.module.ts
++++ b/src/user/user.module.ts
+@@ -10,6 +10,8 @@ import { UserService } from './user.service';
+ import { UserBindingService } from './user.service.binding';
+ import { UserLoginService } from './user.service.login';
+ import { UserProfileService } from './user.service.profile';
++import { UserAvatarService } from './user-avatar.service';
++import { AvatarImageProcessor } from './avatar-image.processor';
+ import { UserController } from './user.controller';
+ import { FingerprintService } from './fingerprint/fingerprint.service';
+ import { SessionGuard } from '../common/guards/session.guard';
+@@ -42,6 +44,8 @@ import { RealtimeModule } from '../realtime/realtime.module';
+     UserBindingService,
+     UserLoginService,
+     UserProfileService,
++    UserAvatarService,
++    AvatarImageProcessor,
+     SessionGuard,
+     FingerprintService,
+     SmsService,
+diff --git a/src/user/user.service.profile.ts b/src/user/user.service.profile.ts
+index 3378679..0c6a980 100644
+--- a/src/user/user.service.profile.ts
++++ b/src/user/user.service.profile.ts
+@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
+ import { UserEntity } from './entities/user.entity';
+ import { UserIdentifierHistoryEntity } from './entities/user-identifier-history.entity';
+ import { UserService } from './user.service';
++import { UserAvatarService } from './user-avatar.service';
+ import { UserBindingService } from './user.service.binding';
+ 
+ const RENAME_COOLDOWN_MS = 14 * 24 * 60 * 60 * 1000; // 两周
+@@ -14,12 +15,14 @@ export class UserProfileService {
+     @InjectRepository(UserEntity)
+     private readonly userRepo: Repository<UserEntity>,
+     private readonly userService: UserService,
++    private readonly userAvatarService: UserAvatarService,
+     private readonly userBindingService: UserBindingService,
+   ) { }
+ 
+   /** 用户资料：名字、上次改名时间、令牌创建/上次重置时间、主设备与迁移状态 */
+   async getProfile(userId: number): Promise<{
+     user_display_id: string;
++    avatar_url: string | null;
+     display_id_changed_at: Date | null;
+     token_reset_at: Date;
+     primary_device_id: number | null;
+@@ -34,6 +37,7 @@ export class UserProfileService {
+ 
+     return {
+       user_display_id: user.user_display_id,
++      avatar_url: this.userAvatarService.getUrl(user.avatar_filename),
+       display_id_changed_at: user.user_display_id_changed_at,
+       // 从未重置过则视为注册时创建
+       token_reset_at: user.user_token_reset_at ?? user.created_at,

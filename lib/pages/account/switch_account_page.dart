@@ -14,7 +14,7 @@ import '../../widgets/account_card.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_empty_state.dart';
 import '../../widgets/app_error_state.dart';
-import '../../widgets/app_snackbar.dart';
+import '../../widgets/app_toast.dart';
 import '../settings/settings_navigation.dart';
 import 'register_page.dart';
 
@@ -269,7 +269,7 @@ class _SwitchAccountPageState extends State<SwitchAccountPage> {
     if (!card.enabled) return;
     if (card.isCurrent) {
       if (!mounted) return;
-      showAppSnackBar(context, message: '已是当前账户', duration: const Duration(seconds: 1));
+      showAppToast(context, message: '已是当前账户', duration: const Duration(seconds: 1));
       return;
     }
 
@@ -281,7 +281,7 @@ class _SwitchAccountPageState extends State<SwitchAccountPage> {
     final token = await _resolveFullToken(a);
     if (!mounted) return;
     if (token == null) {
-      showAppSnackBar(context, message: '令牌不可用，请下拉刷新后重试');
+      showAppToast(context, message: '令牌不可用，请下拉刷新后重试');
       return;
     }
 
@@ -294,7 +294,7 @@ class _SwitchAccountPageState extends State<SwitchAccountPage> {
     setState(() => _switching = false);
 
     if (!success) {
-      showAppSnackBar(
+      showAppToast(
         context,
         message: _loginErrorText(ApiService.lastError),
       );
@@ -308,7 +308,7 @@ class _SwitchAccountPageState extends State<SwitchAccountPage> {
     });
     await _loadSwitchLock();
     if (!mounted) return;
-    showAppSnackBar(
+    showAppToast(
       context,
       message: '已切换账户',
       duration: const Duration(seconds: 1),

@@ -5,8 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../services/api.dart';
+import '../../services/avatar_cropper.dart';
 import '../../services/account_display.dart';
-import '../../services/avatar_storage.dart';
+import '../../widgets/user_avatar.dart';
 import '../../services/binding_cache.dart';
 import '../../services/session_service.dart';
 import '../../services/storage.dart';
@@ -17,7 +18,7 @@ import '../../theme/app_dimens_accent.dart';
 import '../settings/settings_navigation.dart';
 import '../settings/settings_page.dart';
 import '../settings/version_page.dart';
-import '../../widgets/app_snackbar.dart';
+import '../../widgets/app_toast.dart';
 import 'device_binding_page.dart';
 import 'register_page.dart';
 import 'switch_account_page.dart';
@@ -38,7 +39,12 @@ class _UserPageState extends State<UserPage> {
   bool _resettingToken = false;
   String? _error;
   String _externalToken = '';
-  Uint8List? _avatarBytes;
+  String? _avatarUrl;
+  VoidCallback? _dismissAvatarProgress;
+  bool _uploadingAvatar = false;
+  bool _choosingAvatar = false;
+  int _accountGeneration = 0;
+  int _avatarRevision = 0;
   DateTime? _displayIdChangedAt;
 
   /// 用户页打开时预取绑定列表 + 切号锁；进切换页前等待完成以免闪烁
@@ -66,10 +72,14 @@ class _UserPageState extends State<UserPage> {
   }
 
   void _reloadAccountUi() {
+    _dismissAvatarProgress?.call();
+    _dismissAvatarProgress = null;
+    _accountGeneration++;
+    _avatarUrl = null;
+    _uploadingAvatar = false;
     _nameController.text =
         PostStorage.getDisplayName() ?? PostStorage.getUserName();
     _loadExternalToken();
-    _loadAvatar();
     _loadProfile();
   }
 
@@ -84,31 +94,85 @@ class _UserPageState extends State<UserPage> {
     });
   }
 
-  Future<void> _loadAvatar() async {
-    final bytes = await AvatarStorage.load();
-    if (mounted) setState(() => _avatarBytes = bytes);
+  Future<void> _showAvatarMessage(String message) async {
+    showAppToast(
+      context,
+      message: message,
+      duration: const Duration(seconds: 3),
+    );
   }
 
-  /// 从存储选择一张图片作为头像并保存到本地（与发帖页相同的文件选择方式）
-  Future<void> _pickAvatar() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+  Future<String?> _uploadAvatarWithToast(
+    File file, {
+    required int sessionId,
+    required String sessionSecret,
+  }) async {
+    final dismiss = showAppToast(
+      context,
+      message: '正在上传并审核…',
+      duration: const Duration(seconds: 90),
     );
-    final path = result?.files.single.path;
-    if (path == null) return;
+    _dismissAvatarProgress = dismiss;
     try {
-      final bytes = await File(path).readAsBytes();
-      await AvatarStorage.save(bytes);
-      if (mounted) setState(() => _avatarBytes = bytes);
-    } catch (e) {
-      debugPrint('[UserPage] 更换头像失败: $e');
-      if (mounted) {
-        showAppSnackBar(
-          context,
-          message: '头像更换失败',
-          duration: const Duration(seconds: 1),
-        );
+      return await ApiService.uploadAvatar(
+        file,
+        sessionId: sessionId,
+        sessionSecret: sessionSecret,
+      );
+    } finally {
+      dismiss();
+      if (_dismissAvatarProgress == dismiss) _dismissAvatarProgress = null;
+    }
+  }
+  Future<void> _pickAvatar() async {
+    if (_choosingAvatar || _uploadingAvatar) return;
+    final generation = _accountGeneration;
+    _choosingAvatar = true;
+    File? preparedAvatar;
+    try {
+      final session = await _readySession();
+      if (!mounted || generation != _accountGeneration) return;
+      if (session == null) {
+        await _showAvatarMessage('请先登录后再上传头像');
+        return;
+      }
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+      );
+      if (!mounted || generation != _accountGeneration) return;
+      final path = result?.files.single.path;
+      if (path == null) return;
+      preparedAvatar = await AvatarCropper.crop(path, theme: Theme.of(context));
+      if (!mounted || generation != _accountGeneration || preparedAvatar == null) return;
+      setState(() => _uploadingAvatar = true);
+      final url = await _uploadAvatarWithToast(
+        preparedAvatar,
+        sessionId: session.id,
+        sessionSecret: session.secret,
+      );
+      final error = ApiService.lastError;
+      if (!mounted || generation != _accountGeneration) return;
+      if (url == null) {
+        await _showAvatarMessage(error ?? '头像上传失败，请稍后重试');
+        return;
+      }
+      setState(() {
+        _avatarRevision++;
+        _avatarUrl = url;
+      });
+      await _showAvatarMessage('头像已通过审核并更新');
+    } catch (error) {
+      if (mounted && generation == _accountGeneration) {
+        await _showAvatarMessage('头像上传失败，请稍后重试');
+      }
+    } finally {
+      _choosingAvatar = false;
+      if (preparedAvatar != null) {
+        await preparedAvatar.delete().catchError((_) => preparedAvatar!);
+      }
+      if (mounted && generation == _accountGeneration) {
+        setState(() => _uploadingAvatar = false);
       }
     }
   }
@@ -128,7 +192,10 @@ class _UserPageState extends State<UserPage> {
   }
 
   Future<void> _loadProfile() async {
+    final generation = _accountGeneration;
+    final avatarRevision = _avatarRevision;
     final session = await _readySession();
+    if (!mounted || generation != _accountGeneration) return;
     if (session == null) {
       debugPrint('[UserPage] profile: session 未就绪');
       return;
@@ -137,12 +204,13 @@ class _UserPageState extends State<UserPage> {
       sessionId: session.id,
       sessionSecret: session.secret,
     );
-    if (!mounted || profile == null) return;
+    if (!mounted || profile == null || generation != _accountGeneration) return;
     setState(() {
       if (profile.userDisplayId.isNotEmpty) {
         _nameController.text = profile.userDisplayId;
       }
       _displayIdChangedAt = profile.displayIdChangedAt;
+      if (avatarRevision == _avatarRevision) _avatarUrl = profile.avatarUrl;
     });
     if (profile.userDisplayId.isNotEmpty) {
       await PostStorage.saveDisplayName(profile.userDisplayId);
@@ -151,6 +219,7 @@ class _UserPageState extends State<UserPage> {
 
   @override
   void dispose() {
+    _dismissAvatarProgress?.call();
     accountDisplayEpoch.removeListener(_onAccountDisplayChanged);
     _nameFocus.removeListener(_onNameFocusChange);
     _nameController.dispose();
@@ -261,7 +330,7 @@ class _UserPageState extends State<UserPage> {
   void _copyToken() {
     if (_externalToken.isEmpty) return;
     Clipboard.setData(ClipboardData(text: _externalToken));
-    showAppSnackBar(
+    showAppToast(
       context,
       message: '已复制用户令牌',
       duration: const Duration(seconds: 1),
@@ -368,7 +437,7 @@ class _UserPageState extends State<UserPage> {
       final session = await _readySession();
       if (session == null) {
         if (mounted) {
-          showAppSnackBar(
+          showAppToast(
             context,
             message: '会话验证失败，请稍后重试',
             duration: const Duration(seconds: 2),
@@ -382,7 +451,7 @@ class _UserPageState extends State<UserPage> {
       );
       if (!mounted) return;
       if (result == null) {
-        showAppSnackBar(
+        showAppToast(
           context,
           message: ApiService.lastError ?? '令牌重置失败',
           duration: const Duration(seconds: 2),
@@ -397,14 +466,14 @@ class _UserPageState extends State<UserPage> {
       await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
       setState(() => _externalToken = result.userToken);
       if (!mounted) return;
-      showAppSnackBar(
+      showAppToast(
         context,
         message: '用户令牌已重置',
         duration: const Duration(seconds: 2),
       );
     } catch (e) {
       if (mounted) {
-        showAppSnackBar(
+        showAppToast(
           context,
           message: '网络异常：$e',
           duration: const Duration(seconds: 2),
@@ -691,7 +760,7 @@ class _UserPageState extends State<UserPage> {
     Navigator.of(context).push(
       topDownRoute(
         UserProfilePage(
-          avatarBytes: _avatarBytes,
+          avatarUrl: _avatarUrl,
           name: _nameController.text,
           token: _externalToken,
         ),
@@ -719,13 +788,12 @@ class _UserPageState extends State<UserPage> {
       child: Row(
         children: [
           GestureDetector(
-            onTap: isRegistered ? _pickAvatar : _openRegister,
-            child: CircleAvatar(
+            onTap: _uploadingAvatar ? null : (isRegistered ? _pickAvatar : _openRegister),
+            child: UserAvatar(
+              url: _avatarUrl,
               radius: 36,
               backgroundColor: colors.common.idTint.withValues(alpha: 0.2),
-              backgroundImage: _avatarBytes != null
-                  ? MemoryImage(_avatarBytes!) as ImageProvider
-                  : const AssetImage('assets/420px-Transparent_Akkarin.jpg'),
+              loading: _uploadingAvatar,
             ),
           ),
           const SizedBox(width: 16),

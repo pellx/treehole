@@ -893,7 +893,49 @@ class ApiService {
     }
   }
 
-  /// POST /user/profile — 查询名字与令牌重置时间
+  /// POST /user/avatar — 上传图片，通过服务器审核后返回正式头像地址。
+  static Future<String?> uploadAvatar(
+    File file, {
+    required int sessionId,
+    required String sessionSecret,
+  }) async {
+    lastError = null;
+    try {
+      if (await file.length() > 5 * 1024 * 1024) {
+        lastError = '头像不能超过 5MB';
+        return null;
+      }
+      final request =
+          http.MultipartRequest('POST', Uri.parse('$_userBase/avatar'))
+            ..headers.addAll({
+              'x-session-id': '$sessionId',
+              'x-session-secret': sessionSecret,
+            })
+            ..files.add(await http.MultipartFile.fromPath('file', file.path));
+      final response = await _client
+          .send(request)
+          .then(http.Response.fromStream)
+          .timeout(const Duration(seconds: 90));
+      if (!_isHttpSuccess(response.statusCode)) {
+        lastError = _parseErrorMessage(utf8.decode(response.bodyBytes));
+        return null;
+      }
+      final data =
+          jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+      final url = data['avatar_url'] as String?;
+      if (url == null || url.isEmpty) {
+        lastError = errMissingField;
+        return null;
+      }
+      lastError = null;
+      return url;
+    } catch (error) {
+      lastError = _networkErrorOf(error);
+      return null;
+    }
+  }
+
+  /// POST /user/profile — 查询名字、头像与令牌重置时间
   static Future<UserProfileResult?> getUserProfile({
     required int sessionId,
     required String sessionSecret,

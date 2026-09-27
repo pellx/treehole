@@ -1,12 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
-/// 显示参考图风格的小黑框 Toast（半透明黑底 + 白字）
-void showAppToast(
+final _activeToastDismissals = Expando<VoidCallback>();
+
+/// 普通反馈统一使用下半部小提示；重要内容使用居中的确认弹窗。
+/// 返回关闭函数；同一页面的新提示会替换旧提示，不占用页面布局。
+VoidCallback showAppToast(
   BuildContext context, {
   required String message,
   Duration duration = const Duration(milliseconds: 1500),
 }) {
   final overlay = Overlay.of(context);
+  _activeToastDismissals[overlay]?.call();
   late final OverlayEntry entry;
   entry = OverlayEntry(
     builder: (ctx) => Positioned.fill(
@@ -44,17 +50,20 @@ void showAppToast(
     ),
   );
   overlay.insert(entry);
-  Future.delayed(duration, () {
-    if (entry.mounted) entry.remove();
-  });
-}
+  var removed = false;
+  Timer? timer;
+  void dismiss() {
+    if (removed) return;
+    removed = true;
+    timer?.cancel();
+    if (_activeToastDismissals[overlay] == dismiss) {
+      _activeToastDismissals[overlay] = null;
+    }
+    entry.remove();
+    entry.dispose();
+  }
 
-/// 显示统一风格的提示（现改用半透明小黑框 Toast）
-void showAppSnackBar(
-  BuildContext context, {
-  required String message,
-  Duration duration = const Duration(seconds: 2),
-  SnackBarAction? action,
-}) {
-  showAppToast(context, message: message, duration: duration);
+  _activeToastDismissals[overlay] = dismiss;
+  timer = Timer(duration, dismiss);
+  return dismiss;
 }

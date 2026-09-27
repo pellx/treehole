@@ -1,0 +1,15 @@
+diff --git a/src/moderation/moderation.service.ts b/src/moderation/moderation.service.ts
+index 4c72482..e64443f 100644
+--- a/src/moderation/moderation.service.ts
++++ b/src/moderation/moderation.service.ts
+@@ -166,7 +166,9 @@ export class ModerationService {
+ 
+       const results = response.body?.data?.result || [];
+       if (required && (!Array.isArray(results) || results.length === 0 ||
+-          results.some((result) => !result.label || !Number.isFinite(result.confidence)))) {
++          results.some((result) => !result || typeof result.label !== 'string' || !result.label.trim() ||
++            (result.label !== 'nonLabel' && !Number.isFinite(result.confidence))))) {
++        this.logger.warn('图片审核返回结构异常，已拦截；requestId=' + response.body?.requestId);
+         return { passed: false, reason: '图片审核结果异常，请稍后重试' };
+       }
+       const { confidenceThreshold, blockLabels, ignoreLabels } = MODERATION_CONFIG.image;
