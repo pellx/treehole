@@ -1,3 +1,6 @@
+import 'package:crypto/crypto.dart';
+import 'package:uuid/uuid.dart';
+import 'device_credential_store.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
@@ -22,6 +25,15 @@ import 'storage.dart';
 bool _isHttpSuccess(int statusCode) => statusCode >= 200 && statusCode < 300;
 
 class ApiService {
+  static final Map<String, String> _publishAttempts = {};
+  static String _publishId(String scope, List<int> payload) {
+    final key = '$scope:${sha256.convert(payload)}';
+    if (!_publishAttempts.containsKey(key) && _publishAttempts.length >= 100) {
+      _publishAttempts.remove(_publishAttempts.keys.first);
+    }
+    return _publishAttempts.putIfAbsent(key, () => const Uuid().v4());
+  }
+
   static const _base = 'https://tree.leisure.xin/node/posts';
   static const _baseV2 = 'https://tree.leisure.xin/node/posts/v2';
   static const _commentBase =
@@ -375,13 +387,24 @@ class ApiService {
     return null;
   }
 
-  /// 上传不带 session / user_id（后端 DTO 禁止，署名走发帖 body 的 author）。
+  /// 上传通过请求头携带登录凭据，发布标识在相同内容重试时复用。
   static Future<UploadResult?> uploadFile(
     PostUploadType type,
     File file,
   ) async {
     try {
+      final id = await DeviceCredentialStore.getSessionId();
+      final secret = await DeviceCredentialStore.getSessionSecret();
+      if (id == null || secret == null) {
+        lastError = '请先登录再上传';
+        return null;
+      }
       final request = http.MultipartRequest('POST', Uri.parse(_uploadBase));
+      request.headers.addAll({
+        'x-session-id': '$id',
+        'x-session-secret': secret,
+        'x-publish-id': _publishId('upload:$id', await file.readAsBytes()),
+      });
       request.fields['type'] = type.apiValue;
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       final streamed = await _client.send(request).timeout(_timeout);
@@ -419,7 +442,13 @@ class ApiService {
       final res = await _client
           .post(
             Uri.parse(_baseV2),
-            headers: const {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'x-publish-id': _publishId(
+                '_baseV2:$sessionId',
+                utf8.encode(jsonEncode(body)),
+              ),
+            },
             body: jsonEncode(body),
           )
           .timeout(_timeout);
@@ -480,7 +509,13 @@ class ApiService {
       final res = await _client
           .post(
             Uri.parse(_commentBaseV2),
-            headers: const {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              'x-publish-id': _publishId(
+                '_commentBaseV2:$sessionId',
+                utf8.encode(jsonEncode(body)),
+              ),
+            },
             body: jsonEncode(body),
           )
           .timeout(_timeout);
@@ -1002,6 +1037,10 @@ class ApiService {
       final request =
           http.MultipartRequest('POST', Uri.parse('$_userBase/avatar'))
             ..headers.addAll({
+              'x-publish-id': _publishId(
+                'avatar:$sessionId',
+                await file.readAsBytes(),
+              ),
               'x-session-id': '$sessionId',
               'x-session-secret': sessionSecret,
             })

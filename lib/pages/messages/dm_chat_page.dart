@@ -40,6 +40,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
   bool _pinned = false;
   bool _blocked = false;
   bool _canSend = true;
+  Timer? _banExpiry;
   Map<String, dynamic>? _peerProfile;
   Map<String, dynamic>? _selfProfile;
   void _applyDetails(Map<String, dynamic> data) {
@@ -47,6 +48,18 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
     _pinned = data['pinned'] == true;
     _blocked = data['blocked'] == true;
     _canSend = data['can_send'] != false;
+    _banExpiry?.cancel();
+    final until = DateTime.tryParse(data['banned_until']?.toString() ?? '');
+    if (data['send_disabled'] == true &&
+        data['permanent'] != true &&
+        until != null) {
+      final delay = until.difference(DateTime.now());
+      if (!delay.isNegative) {
+        _banExpiry = Timer(delay + const Duration(seconds: 1), () {
+          if (mounted) _load(silent: true);
+        });
+      }
+    }
     _peerProfile = data['peer'] as Map<String, dynamic>?;
     _selfProfile = data['self'] as Map<String, dynamic>?;
   }
@@ -294,12 +307,17 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
     } catch (error) {
       dismiss();
       if (mounted) {
-        if (error is DmException && error.code == 'DM_SEND_DISABLED') {
+        if (error is DmException &&
+            (error.code == 'ACCOUNT_BANNED' ||
+                error.code == 'DM_SEND_DISABLED')) {
           setState(() => _canSend = false);
         }
         showAppToast(
           context,
-          message: error is DmException && error.code == 'DM_SEND_DISABLED'
+          message:
+              error is DmException &&
+                  (error.code == 'ACCOUNT_BANNED' ||
+                      error.code == 'DM_SEND_DISABLED')
               ? error.toString()
               : '${error.toString()}；可修改内容或重试',
         );
@@ -313,6 +331,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _banExpiry?.cancel();
     _realtimeSubscription?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     if (DmInbox.visibleConversationId == widget.conversationId) {

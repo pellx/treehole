@@ -371,3 +371,7 @@ dart analyze          # 静态分析（CI 必须通过）
 ## 消息缓存与私信审核
 
 消息列表和已加载历史按账号加密缓存，联网时增量同步。私信发送须通过审核，连续三条明确拒绝后关闭该账号发送能力；审核服务异常不计违规。数据库、审核配置与启用步骤见 [MESSAGE_CACHE_MODERATION_DEPLOY.md](deploy/MESSAGE_CACHE_MODERATION_DEPLOY.md)。
+
+### 统一内容安全
+
+违规历史和账号封禁统一由后端内容安全模块管理。App 图片上传携带会话请求头；审核失败与账号封禁沿用底部小提示。处罚与数据库更名迁移见 [内容安全部署说明](deploy/CONTENT_SAFETY_DEPLOY.md)。本说明替代之前私信三次永久禁发规则。
