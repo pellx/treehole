@@ -34,39 +34,40 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
         statusBarColor: bg,
         statusBarIconBrightness:
             ThemeData.estimateBrightnessForColor(bg) == Brightness.light
-                ? Brightness.dark
-                : Brightness.light,
+            ? Brightness.dark
+            : Brightness.light,
       ),
       child: Container(
         color: bg,
         child: SafeArea(
-        bottom: false,
-        child: SizedBox(
-          height: height,
-          child: NavigationToolbar(
-            middle: Text(
-              title,
-              style: TextStyle(
-                fontSize: AppDimens.settingsBarHeight * 0.354,
-                fontWeight: FontWeight.w500,
-                color: barText,
+          bottom: false,
+          child: SizedBox(
+            height: height,
+            child: NavigationToolbar(
+              middle: Text(
+                title,
+                style: TextStyle(
+                  fontSize: AppDimens.settingsBarHeight * 0.354,
+                  fontWeight: FontWeight.w500,
+                  color: barText,
+                ),
               ),
+              leading: automaticallyImplyLeading
+                  ? IconButton(
+                      icon: Icon(
+                        _useCupertinoBack(context)
+                            ? Icons.arrow_back_ios
+                            : Icons.arrow_back,
+                        color: barText,
+                        size: 24,
+                      ),
+                      onPressed:
+                          onBack ?? () => Navigator.of(context).maybePop(),
+                    )
+                  : const SizedBox(width: 48),
+              trailing: trailing ?? const SizedBox(width: 48),
             ),
-            leading: automaticallyImplyLeading
-                ? IconButton(
-                    icon: Icon(
-                      _useCupertinoBack(context)
-                          ? Icons.arrow_back_ios
-                          : Icons.arrow_back,
-                      color: barText,
-                      size: 24,
-                    ),
-                    onPressed: onBack ?? () => Navigator.of(context).maybePop(),
-                  )
-                : const SizedBox(width: 48),
-            trailing: trailing ?? const SizedBox(width: 48),
           ),
-        ),
         ),
       ),
     );
@@ -86,6 +87,7 @@ class AppScaffold extends StatelessWidget {
   final String title;
   final Widget body;
   final Widget? trailing;
+  final bool automaticallyImplyLeading;
   final bool resizeToAvoidBottomInset;
   final Color? backgroundColor;
   final VoidCallback? onBack;
@@ -95,6 +97,7 @@ class AppScaffold extends StatelessWidget {
     required this.title,
     required this.body,
     this.trailing,
+    this.automaticallyImplyLeading = true,
     this.resizeToAvoidBottomInset = true,
     this.backgroundColor,
     this.onBack,
@@ -108,7 +111,12 @@ class AppScaffold extends StatelessWidget {
           backgroundColor ?? Theme.of(context).scaffoldBackgroundColor,
       body: Column(
         children: [
-          AppAppBar(title: title, trailing: trailing, onBack: onBack),
+          AppAppBar(
+            title: title,
+            trailing: trailing,
+            onBack: onBack,
+            automaticallyImplyLeading: automaticallyImplyLeading,
+          ),
           Expanded(child: body),
         ],
       ),

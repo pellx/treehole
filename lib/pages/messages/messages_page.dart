@@ -6,6 +6,7 @@ import '../../services/dm_notifications.dart';
 import '../../services/dm_inbox.dart';
 import '../../services/realtime_service.dart';
 import '../../widgets/app_app_bar.dart';
+import '../../widgets/app_bottom_sheet.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/user_avatar.dart';
 import '../account/register_page.dart';
@@ -94,13 +95,6 @@ class _MessagesPageState extends State<MessagesPage>
       _failed = false;
       _requiresLogin = false;
     });
-    final dismiss = silent
-        ? () {}
-        : showAppToast(
-            context,
-            message: '正在获取消息',
-            duration: const Duration(seconds: 25),
-          );
     try {
       if (reset && (!silent || _api == null)) {
         _api?.close();
@@ -179,11 +173,9 @@ class _MessagesPageState extends State<MessagesPage>
             _systemCounts = {};
           }
         });
-        dismiss();
         if (!silent) showAppToast(context, message: error.toString());
       }
     } finally {
-      dismiss();
       if (mounted && generation == _generation) {
         setState(() => _busy = false);
         if (_refreshPending && widget.active) {
@@ -227,7 +219,7 @@ class _MessagesPageState extends State<MessagesPage>
         ),
       ),
     );
-    if (mounted && widget.active) await _load(reset: true);
+    if (mounted && widget.active) await _load(reset: true, silent: true);
   }
 
   Future<void> _create() async {
@@ -238,11 +230,6 @@ class _MessagesPageState extends State<MessagesPage>
     );
     if (peer == null || !mounted) return;
     setState(() => _busy = true);
-    final dismiss = showAppToast(
-      context,
-      message: '正在打开会话',
-      duration: const Duration(seconds: 25),
-    );
     Map<String, dynamic>? conversation;
     try {
       final result = await _api!.request(
@@ -251,13 +238,56 @@ class _MessagesPageState extends State<MessagesPage>
       );
       conversation = result['conversation'] as Map<String, dynamic>;
     } catch (error) {
-      dismiss();
       if (mounted) showAppToast(context, message: error.toString());
     } finally {
-      dismiss();
       if (mounted) setState(() => _busy = false);
     }
     if (mounted && conversation != null) await _open(conversation);
+  }
+
+  Future<void> _clearUnread() async {
+    if (_busy || _api == null || _userId == null) return;
+    setState(() => _busy = true);
+    try {
+      await _api!.request('read-all', body: {});
+      if (!mounted) return;
+      setState(() {
+        for (final item in _items) {
+          item['unread_count'] = 0;
+        }
+        _systemCounts = {'announcement': 0, 'moderation': 0, 'reply': 0};
+      });
+      unawaited(DmInbox.refresh());
+      showAppToast(context, message: '已清理未读消息');
+    } catch (error) {
+      if (mounted) showAppToast(context, message: error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (mounted && widget.active) await _load(reset: true, silent: true);
+  }
+
+  void _showActions() {
+    showAppActionsSheet(
+      context: context,
+      actions: [
+        AppSheetAction(
+          icon: Icons.add_comment_outlined,
+          label: '发起私信',
+          onTap: () => _create(),
+        ),
+        AppSheetAction(
+          icon: Icons.refresh,
+          label: '刷新消息',
+          onTap: () => _load(reset: true, silent: true),
+        ),
+        AppSheetAction(
+          icon: Icons.notifications_outlined,
+          label: '通知权限',
+          onTap: () => _requestNotifications(),
+        ),
+      ],
+    );
   }
 
   @override
@@ -272,24 +302,22 @@ class _MessagesPageState extends State<MessagesPage>
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      title: _userId == null ? '消息' : '消息 · 我的 ID $_userId',
+      title: '消息',
+      automaticallyImplyLeading: false,
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           IconButton(
-            tooltip: '通知权限',
-            onPressed: _requestNotifications,
-            icon: const Icon(Icons.notifications_outlined),
+            tooltip: '一键清理未读',
+            onPressed: _busy || _api == null || _userId == null
+                ? null
+                : _clearUnread,
+            icon: const Icon(Icons.done_all),
           ),
           IconButton(
-            tooltip: '刷新',
-            onPressed: _busy ? null : () => _load(reset: true),
-            icon: const Icon(Icons.refresh),
-          ),
-          IconButton(
-            tooltip: '发起私信',
-            onPressed: _busy || _userId == null ? null : _create,
-            icon: const Icon(Icons.add_comment_outlined),
+            tooltip: '更多消息操作',
+            onPressed: _busy ? null : _showActions,
+            icon: const Icon(Icons.more_horiz),
           ),
         ],
       ),
@@ -326,7 +354,9 @@ class _MessagesPageState extends State<MessagesPage>
                           ),
                         ),
                       );
-                      if (mounted && widget.active) await _load(reset: true);
+                      if (mounted && widget.active) {
+                        await _load(reset: true, silent: true);
+                      }
                     },
             ),
           const Divider(height: 1),
