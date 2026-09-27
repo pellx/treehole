@@ -30,6 +30,19 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
   final _input = TextEditingController();
   final _scroll = ScrollController();
   final List<Map<String, dynamic>> _messages = [];
+  // Pending/rejected text stays only in this page's memory, never in the history cache.
+  final List<Map<String, dynamic>> _localMessages = [];
+  void _reconcileLocal() {
+    final acknowledged = _messages
+        .where((m) => m['sender_id'] == widget.userId)
+        .map((m) => m['client_message_id'])
+        .whereType<String>()
+        .toSet();
+    _localMessages.removeWhere(
+      (m) => acknowledged.contains(m['client_message_id']),
+    );
+  }
+
   int? _next;
   bool _busy = false;
   bool _sending = false;
@@ -243,6 +256,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
           ),
         );
         _messages.sort((a, b) => (b['seq'] as int).compareTo(a['seq'] as int));
+        _reconcileLocal();
         _next = result['next_before_seq'] as int?;
         final acknowledged = result['last_read_seq'] as int? ?? 0;
         if (acknowledged > _lastRead) _lastRead = acknowledged;
@@ -255,6 +269,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
       if (mounted && error is DmException && error.requiresLogin) {
         setState(() {
           _messages.clear();
+          _localMessages.clear();
           _canSend = false;
         });
       }
@@ -282,19 +297,30 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
       _pendingText = text;
       _pendingKey = const Uuid().v4();
     }
-    setState(() => _sending = true);
-    final dismiss = showAppToast(
-      context,
-      message: '正在发送',
-      duration: const Duration(seconds: 25),
-    );
+    final key = _pendingKey!;
+    setState(() {
+      _sending = true;
+      _localMessages.removeWhere((m) => m['client_message_id'] == key);
+      _localMessages.insert(0, {
+        'client_message_id': key,
+        'sender_id': widget.userId,
+        'content': text,
+        'created_at': DateTime.now().toIso8601String(),
+        'local_status': 'pending',
+      });
+      _input.clear();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scroll.hasClients) _scroll.jumpTo(0);
+    });
     try {
       final message = await widget.api.request(
         'conversations/${widget.conversationId}/messages',
-        body: {'content': text, 'client_message_id': _pendingKey},
+        body: {'content': text, 'client_message_id': key},
       );
       if (!mounted) return;
       setState(() {
+        _localMessages.removeWhere((m) => m['client_message_id'] == key);
         _messages.removeWhere((m) => m['id'] == message['id']);
         _messages.add(message);
         _messages.sort((a, b) => (b['seq'] as int).compareTo(a['seq'] as int));
@@ -305,8 +331,22 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
       if (_scroll.hasClients) _scroll.jumpTo(0);
       _refreshPending = true;
     } catch (error) {
-      dismiss();
       if (mounted) {
+        setState(() {
+          if (error is DmException && error.requiresLogin) {
+            _localMessages.clear();
+          } else {
+            for (final item in _localMessages) {
+              if (item['client_message_id'] == key) {
+                item['local_status'] = 'failed';
+                item['local_error'] = error.toString();
+              }
+            }
+            _input.text = text;
+          }
+        });
+        // A lost response may hide an already committed send; reconcile with server history.
+        _refreshPending = true;
         if (error is DmException &&
             (error.code == 'ACCOUNT_BANNED' ||
                 error.code == 'DM_SEND_DISABLED')) {
@@ -323,7 +363,6 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
         );
       }
     } finally {
-      dismiss();
       if (mounted) setState(() => _sending = false);
       _drainRefresh();
     }
@@ -345,6 +384,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final visibleMessages = [..._localMessages, ..._messages];
     return AppScaffold(
       title: '用户 #${widget.peerId}',
       trailing: Row(
@@ -381,15 +421,16 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
         child: Column(
           children: [
             Expanded(
-              child: _messages.isEmpty
+              child: visibleMessages.isEmpty
                   ? Center(child: Text(_loaded ? '还没有消息，打个招呼吧' : ''))
                   : ListView.builder(
                       controller: _scroll,
                       reverse: true,
                       padding: const EdgeInsets.all(16),
-                      itemCount: _messages.length + (_next == null ? 0 : 1),
+                      itemCount:
+                          visibleMessages.length + (_next == null ? 0 : 1),
                       itemBuilder: (context, index) {
-                        if (index == _messages.length) {
+                        if (index == visibleMessages.length) {
                           return TextButton(
                             onPressed: _busy || _sending
                                 ? null
@@ -397,7 +438,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                             child: const Text('加载更早消息'),
                           );
                         }
-                        final item = _messages[index];
+                        final item = visibleMessages[index];
                         final mine = item['sender_id'] == widget.userId;
                         final date = DateTime.tryParse(
                           item['created_at'] as String? ?? '',
@@ -443,6 +484,31 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                                   ),
                                 ),
                                 const SizedBox(height: 4),
+                                if (item['local_status'] == 'failed')
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: IconButton(
+                                      tooltip:
+                                          '${item['local_error'] ?? '发送失败'}；点击重试，或在输入框修改',
+                                      icon: Icon(
+                                        Icons.error_outline,
+                                        color: colors.error,
+                                        size: 20,
+                                      ),
+                                      onPressed: _sending || _busy || !_canSend
+                                          ? null
+                                          : () {
+                                              _input.text =
+                                                  item['content'] as String;
+                                              _pendingText =
+                                                  item['content'] as String;
+                                              _pendingKey =
+                                                  item['client_message_id']
+                                                      as String;
+                                              _send();
+                                            },
+                                    ),
+                                  ),
                                 Text(
                                   time,
                                   style: TextStyle(

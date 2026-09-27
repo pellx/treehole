@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:treehole/pages/messages/dm_chat_page.dart';
@@ -9,6 +10,8 @@ import 'package:treehole/widgets/user_avatar.dart';
 class FakeDmApi implements DmApi {
   final sends = <Map<String, dynamic>>[];
   bool failFirst = true;
+  Completer<void>? sendGate;
+  DmException? sendError;
   int lastRead = 0;
   bool muted = false;
   bool pinned = false;
@@ -51,11 +54,14 @@ class FakeDmApi implements DmApi {
       };
     }
     sends.add(Map.of(body));
+    if (sendGate != null) await sendGate!.future;
+    if (sendError != null) throw sendError!;
     if (failFirst) {
       failFirst = false;
       throw const DmException('网络连接失败');
     }
     final result = <String, dynamic>{
+      'client_message_id': body['client_message_id'],
       'id': 1,
       'seq': 1,
       'sender_id': 1,
@@ -71,6 +77,65 @@ class FakeDmApi implements DmApi {
 }
 
 void main() {
+  testWidgets(
+    'renders pending immediately, keeps it out of read cursors, then reconciles one approved bubble',
+    (tester) async {
+      final api = FakeDmApi()
+        ..failFirst = false
+        ..sendGate = Completer<void>();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.light]),
+          home: DmChatPage(api: api, conversationId: 8, peerId: 2, userId: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '即时显示');
+      await tester.tap(find.text('发送'));
+      await tester.pump();
+      expect(find.text('即时显示'), findsOneWidget);
+      expect(find.byTooltip('审核中，仅自己可见'), findsNothing);
+      expect(find.byIcon(Icons.schedule), findsNothing);
+      expect(api.history, isEmpty);
+      expect(api.lastRead, 0);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        isEmpty,
+      );
+      RealtimeService.instance.debugDmEvent(sessionId: 100, conversationId: 8);
+      api.sendGate!.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('即时显示'), findsOneWidget);
+      expect(find.byIcon(Icons.schedule), findsNothing);
+      expect(find.byIcon(Icons.error_outline), findsNothing);
+    },
+  );
+  testWidgets(
+    'rejection stays local, failed bubble survives refresh without entering server history',
+    (tester) async {
+      final api = FakeDmApi()
+        ..failFirst = false
+        ..sendError = const DmException('审核未通过', code: 'CONTENT_REJECTED');
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [AppColors.light]),
+          home: DmChatPage(api: api, conversationId: 8, peerId: 2, userId: 1),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), '本地失败');
+      await tester.tap(find.text('发送'));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+      expect(api.history, isEmpty);
+      expect(api.lastRead, 0);
+      await tester.tap(find.byTooltip('刷新私信'));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.error_outline), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+    },
+  );
   testWidgets(
     'chat settings persist mute and block and render message avatars',
     (tester) async {
