@@ -383,3 +383,5 @@ dart analyze          # 静态分析（CI 必须通过）
 - notificationBellOffsetX / notificationBellOffsetY：水平和垂直偏移，正数向右 / 向下，负数向左 / 向上。图标与点击区域一起移动，请保持按钮在顶栏内。
 - light / dark 中的 notificationBellOffColor、notificationBellOnColor、notificationCheckColor：浅色 / 深色主题下未开启、已开启、对勾的颜色。
 - notificationBellSize / notificationCheckSize：铃铛和对勾大小，单位为逻辑像素。
+
+补齐消息写入锁表与权限的手动 SQL 见 [MESSAGE_PUBLISH_LOCK_FIX.md](deploy/MESSAGE_PUBLISH_LOCK_FIX.md)。

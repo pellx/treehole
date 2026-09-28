@@ -26,15 +26,15 @@ class AppMessagesTheme {
 
   /// 浅色主题。Color 使用 0xAARRGGBB，前两位控制透明度。
   static const light = AppMessagesTheme(
-    notificationBellOffColor: Color(0xFF7BB380), // 未开启：较明亮的绿色
-    notificationBellOnColor: Color(0x80000000), // 已开启：较暗的实心铃铛
+    notificationBellOffColor: Color(0x80000000), // 未开启：较明亮的绿色
+    notificationBellOnColor: Color(0xFF7BB380), // 已开启：较暗的实心铃铛
     notificationCheckColor: Color(0xFFE8F5E9), // 已开启：内部对勾
   );
 
   /// 深色主题。
   static const dark = AppMessagesTheme(
-    notificationBellOffColor: Color(0xFF7BB380),
-    notificationBellOnColor: Color(0x80FFFFFF),
+    notificationBellOffColor: Color(0x80FFFFFF),
+    notificationBellOnColor: Color(0xFF7BB380),
     notificationCheckColor: Color(0xFF1B2E1F),
   );
 
