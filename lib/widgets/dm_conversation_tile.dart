@@ -74,9 +74,7 @@ class DmConversationTile extends StatelessWidget {
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
                   AppMessagesTheme.conversationHorizontalPadding,
-                  isFirst
-                      ? AppMessagesTheme.conversationFirstTopPadding
-                      : AppMessagesTheme.conversationVerticalPadding,
+                  isFirst ? 0 : AppMessagesTheme.conversationVerticalPadding,
                   AppMessagesTheme.conversationHorizontalPadding,
                   AppMessagesTheme.conversationVerticalPadding,
                 ),

@@ -9,7 +9,6 @@ import 'services/timezone_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final launchTimer = Stopwatch()..start();
   await Hive.initFlutter();
 
   final postsReady = PostStorage.init();
@@ -19,8 +18,5 @@ void main() async {
   // Start fetching before building the UI, while the native launch screen remains.
   StartupPosts.start();
   await Future.wait([bindingReady, timezoneReady]);
-  // The launch screen lasts at least one second; essential local data may take longer.
-  final remaining = const Duration(seconds: 1) - launchTimer.elapsed;
-  if (remaining > Duration.zero) await Future.delayed(remaining);
   runApp(TreeholeApp(key: appKey));
 }

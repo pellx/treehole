@@ -484,25 +484,40 @@ class _MessagesPageState extends State<MessagesPage>
                                 ],
                               ),
                       )
-                    : RefreshIndicator(
-                        onRefresh: () => _load(reset: true),
-                        child: ListView.builder(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          itemCount: _items.length + (_next == null ? 0 : 1),
-                          itemBuilder: (context, index) {
-                            if (index == _items.length) {
-                              return TextButton(
-                                onPressed: _busy ? null : () => _load(),
-                                child: const Text('加载更多会话'),
+                    : Transform.translate(
+                        offset: Offset(
+                          0,
+                          AppMessagesTheme.conversationFirstTopPadding < 0
+                              ? AppMessagesTheme.conversationFirstTopPadding
+                              : 0,
+                        ),
+                        child: RefreshIndicator(
+                          onRefresh: () => _load(reset: true),
+                          child: ListView.builder(
+                            padding: EdgeInsets.only(
+                              top:
+                                  AppMessagesTheme.conversationFirstTopPadding >
+                                      0
+                                  ? AppMessagesTheme.conversationFirstTopPadding
+                                  : 0,
+                            ),
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            itemCount: _items.length + (_next == null ? 0 : 1),
+                            itemBuilder: (context, index) {
+                              if (index == _items.length) {
+                                return TextButton(
+                                  onPressed: _busy ? null : () => _load(),
+                                  child: const Text('加载更多会话'),
+                                );
+                              }
+                              final item = _items[index];
+                              return DmConversationTile(
+                                conversation: item,
+                                isFirst: index == 0,
+                                onTap: _api == null ? null : () => _open(item),
                               );
-                            }
-                            final item = _items[index];
-                            return DmConversationTile(
-                              conversation: item,
-                              isFirst: index == 0,
-                              onTap: _api == null ? null : () => _open(item),
-                            );
-                          },
+                            },
+                          ),
                         ),
                       ),
               ),
