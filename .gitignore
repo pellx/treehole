@@ -89,3 +89,16 @@ tmp*/
 tmp_*/
 tmp_verification/
 tmp_backend_patch/
+# Local credentials and signing files
+.env*
+!.env.example
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+**/GoogleService-Info.plist
+**/google-services.json
