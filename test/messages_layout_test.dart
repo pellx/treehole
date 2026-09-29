@@ -248,7 +248,10 @@ void main() {
             .getRect(find.byType(MessageInboxShortcuts))
             .bottom;
         final avatarTop = tester.getRect(find.byType(UserAvatar).first).top;
-        expect(avatarTop - shortcutBottom, lessThanOrEqualTo(4));
+        expect(
+          avatarTop - shortcutBottom,
+          closeTo(AppMessagesTheme.conversationFirstTopPadding, 1),
+        );
         final reply = tester.getCenter(find.text('回复'));
         final announcement = tester.getCenter(find.text('公告'));
         final moderation = tester.getCenter(find.text('审核'));
@@ -279,6 +282,28 @@ void main() {
       },
     );
   }
+
+  testWidgets('message shortcuts scroll together with conversations', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 300);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    DmNotifications.debugPermissionStatus = () async => false;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: const [AppColors.light]),
+        home: MessagesPage(api: _LayoutApi()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final shortcuts = find.byType(MessageInboxShortcuts);
+    final before = tester.getTopLeft(shortcuts).dy;
+    await tester.drag(find.byType(ListView), const Offset(0, -100));
+    await tester.pumpAndSettle();
+    expect(tester.getTopLeft(shortcuts).dy, lessThan(before));
+  });
 
   testWidgets('short labels open the existing full inbox titles', (
     tester,
@@ -320,6 +345,7 @@ void main() {
       ),
     );
     expect(find.textContaining('共 5 条消息'), findsNothing);
+    expect(find.text('无历史消息'), findsOneWidget);
   });
 
   testWidgets('render message page at a normal phone size', (tester) async {

@@ -12,7 +12,9 @@ import '../services/timezone_service.dart';
 import '../services/api.dart';
 import '../services/device_credential_store.dart';
 import '../services/session_service.dart';
+import '../services/dm_api.dart';
 import '../pages/account/register_page.dart';
+import '../pages/messages/dm_chat_page.dart';
 import '../pages/settings/settings_navigation.dart';
 import '../widgets/app_bottom_sheet.dart';
 import '../widgets/app_toast.dart';
@@ -38,6 +40,49 @@ class PostCard extends StatefulWidget {
 }
 
 class _PostCardState extends State<PostCard> {
+  bool _openingDm = false;
+
+  Future<void> _messageAuthor() async {
+    if (_openingDm) return;
+    _openingDm = true;
+    DmApi? api;
+    try {
+      try {
+        api = await DmApi.open();
+      } on DmException catch (error) {
+        if (!error.requiresLogin || !mounted) rethrow;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => const RegisterPage(startAtLogin: true),
+          ),
+        );
+        if (!mounted) return;
+        api = await DmApi.open();
+      }
+      final result = await api.request(
+        'conversations/from-post',
+        body: {'post_id': widget.post.id},
+      );
+      if (!mounted) return;
+      final conversation = result['conversation'] as Map<String, dynamic>;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DmChatPage(
+            api: api!,
+            conversationId: conversation['id'] as int,
+            peerId: conversation['peer_user_id'] as int,
+            userId: result['user_id'] as int,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) showAppToast(context, message: error.toString());
+    } finally {
+      api?.close();
+      _openingDm = false;
+    }
+  }
+
   bool _expanded = false; // 正文是否展开
   bool _hasBeenExpanded = false; // 是否曾经被展开过
   int _commentsShowCount = AppDimens.commentMaxShown; // 当前展开的回复数
@@ -240,7 +285,12 @@ class _PostCardState extends State<PostCard> {
         top: AppDimens.titleVPadding,
         bottom: AppDimens.titleVPadding,
       ),
-      child: _TitleAuthorRow(post: post, primary: primary, colors: colors),
+      child: _TitleAuthorRow(
+        post: post,
+        primary: primary,
+        colors: colors,
+        onMessageAuthor: _messageAuthor,
+      ),
     );
   }
 
@@ -1378,14 +1428,16 @@ class _PostCardState extends State<PostCard> {
 }
 
 class _TitleAuthorRow extends StatelessWidget {
-  final dynamic post;
+  final Post post;
   final Color primary;
   final AppColors colors;
+  final VoidCallback onMessageAuthor;
 
   const _TitleAuthorRow({
     required this.post,
     required this.primary,
     required this.colors,
+    required this.onMessageAuthor,
   });
 
   @override
@@ -1405,6 +1457,32 @@ class _TitleAuthorRow extends StatelessWidget {
       color: pc.atSymbol,
       fontStyle: FontStyle.italic,
     );
+
+    Widget authorName({bool withAt = false, bool wrap = false}) =>
+        PopupMenuButton<String>(
+          tooltip: '私信${post.displayAuthor}',
+          position: PopupMenuPosition.under,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 84, maxWidth: 120),
+          onSelected: (_) => onMessageAuthor(),
+          itemBuilder: (_) => const [
+            PopupMenuItem<String>(
+              value: 'reply',
+              height: 40,
+              child: Text('回复'),
+            ),
+          ],
+          child: Text.rich(
+            TextSpan(
+              children: [
+                if (withAt) TextSpan(text: '@', style: atStyle),
+                TextSpan(text: post.displayAuthor, style: authorStyle),
+              ],
+            ),
+            maxLines: wrap ? 2 : 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
 
     // 测量标题和作者宽度（标题最多2行）
     final tp = TextPainter(
@@ -1448,7 +1526,7 @@ class _TitleAuthorRow extends StatelessWidget {
                 SizedBox(width: AppDimens.paddingLg),
                 Text('@', style: atStyle),
                 SizedBox(width: AppDimens.authorAtGap),
-                Text(post.displayAuthor, style: authorStyle),
+                authorName(),
               ],
             )
           // 超宽
@@ -1477,18 +1555,7 @@ class _TitleAuthorRow extends StatelessWidget {
                     SizedBox(width: gap),
                     Flexible(
                       flex: (authorW / totalW * avail).round().clamp(1, 999),
-                      child: Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(text: '@', style: atStyle),
-                            TextSpan(
-                              text: post.displayAuthor,
-                              style: authorStyle,
-                            ),
-                          ],
-                        ),
-                        softWrap: true,
-                      ),
+                      child: authorName(withAt: true, wrap: true),
                     ),
                   ],
                 );
@@ -1525,30 +1592,10 @@ class _TitleAuthorRow extends StatelessWidget {
                           maxWidth:
                               AppDimens.titleAuthorMaxWidth - titleW - gap,
                         ),
-                        child: Text.rich(
-                          TextSpan(
-                            children: [
-                              TextSpan(text: '@', style: atStyle),
-                              TextSpan(
-                                text: post.displayAuthor,
-                                style: authorStyle,
-                              ),
-                            ],
-                          ),
-                        ),
+                        child: authorName(withAt: true),
                       )
                     else
-                      Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(text: '@', style: atStyle),
-                            TextSpan(
-                              text: post.displayAuthor,
-                              style: authorStyle,
-                            ),
-                          ],
-                        ),
-                      ),
+                      authorName(withAt: true),
                   ],
                 );
               }

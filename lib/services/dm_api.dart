@@ -84,7 +84,7 @@ class DmApi {
   }) async {
     if (body == null) return _load('dm', path);
     final data = await _request('dm', path, body: body);
-    if (path == 'conversations') {
+    if (path == 'conversations' || path == 'conversations/from-post') {
       try {
         final row = data['conversation'] as Map<String, dynamic>;
         final cache = await MessageCache.open(accountToken);

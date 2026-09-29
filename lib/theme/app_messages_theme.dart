@@ -56,7 +56,7 @@ class AppMessagesTheme {
 
   /// 三个按钮到首条会话的纵向偏移；负数让会话列表上移，正数增大间距。
   /// 此处允许负值；不要将它直接传给 Padding（Flutter 不接受负留白）。
-  static const double conversationFirstTopPadding = -8;
+  static const double conversationFirstTopPadding = 24;
   static const double conversationAvatarSize = 46;
   static const double conversationAvatarGap = 16;
   static const double conversationTitleFontSize = 17;

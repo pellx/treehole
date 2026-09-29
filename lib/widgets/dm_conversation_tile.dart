@@ -51,9 +51,9 @@ class DmConversationTile extends StatelessWidget {
         ?.replaceAll(RegExp(r'\s+'), ' ')
         .trim();
     final preview = content ?? '';
-    final time = _time(
-      (lastMessage?['created_at'] ?? conversation['updated_at']) as String?,
-    );
+    final time = lastMessage == null
+        ? '无历史消息'
+        : _time(lastMessage['created_at'] as String?);
     final count = conversation['unread_count'] as int? ?? 0;
     final muted = conversation['muted'] == true;
     final pinned = conversation['pinned'] == true;
