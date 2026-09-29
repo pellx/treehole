@@ -8,7 +8,8 @@ import '../../services/realtime_service.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_bottom_sheet.dart';
 import '../../widgets/app_toast.dart';
-import '../../widgets/user_avatar.dart';
+import '../../widgets/dm_conversation_tile.dart';
+import '../../widgets/message_inbox_shortcuts.dart';
 import '../../theme/app_messages_theme.dart';
 import '../account/register_page.dart';
 import 'dm_chat_page.dart';
@@ -16,7 +17,8 @@ import 'system_inbox_page.dart';
 
 class MessagesPage extends StatefulWidget {
   final bool active;
-  const MessagesPage({super.key, this.active = true});
+  final DmApi? api;
+  const MessagesPage({super.key, this.active = true, this.api});
 
   @override
   State<MessagesPage> createState() => _MessagesPageState();
@@ -113,7 +115,7 @@ class _MessagesPageState extends State<MessagesPage>
       if (reset && (!silent || _api == null)) {
         _api?.close();
         _api = null;
-        final local = await DmApi.openLocal();
+        final local = widget.api == null ? await DmApi.openLocal() : null;
         final cachedAccount = local?.accountToken;
         if (local != null) {
           try {
@@ -144,7 +146,7 @@ class _MessagesPageState extends State<MessagesPage>
             _systemCounts = {};
           });
         }
-        final api = await DmApi.open();
+        final api = widget.api ?? await DmApi.open();
         if (!mounted || generation != _generation) {
           api.close();
           return;
@@ -223,6 +225,21 @@ class _MessagesPageState extends State<MessagesPage>
           peerId: conversation['peer_user_id'] as int,
           userId: _userId!,
         ),
+      ),
+    );
+    if (mounted && widget.active) await _load(reset: true, silent: true);
+  }
+
+  Future<void> _openSystemInbox(String category, String title) async {
+    if (_busy) return;
+    if (_api == null || _userId == null) {
+      await _login();
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            SystemInboxPage(api: _api!, category: category, title: title),
       ),
     );
     if (mounted && widget.active) await _load(reset: true, silent: true);
@@ -307,6 +324,12 @@ class _MessagesPageState extends State<MessagesPage>
     );
     return AppScaffold(
       title: '消息',
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? AppMessagesTheme.backgroundDark
+          : AppMessagesTheme.backgroundLight,
+      appBarBackgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? AppMessagesTheme.backgroundDark
+          : AppMessagesTheme.backgroundLight,
       automaticallyImplyLeading: false,
       leading: Transform.translate(
         offset: const Offset(
@@ -344,54 +367,22 @@ class _MessagesPageState extends State<MessagesPage>
           IconButton(
             tooltip: '一键清理未读',
             onPressed: _clearUnread,
-            icon: const Icon(Icons.done_all),
+            icon: const Icon(Icons.cleaning_services_outlined),
           ),
           IconButton(
             tooltip: '更多消息操作',
             onPressed: _showActions,
-            icon: const Icon(Icons.more_horiz),
+            icon: const Icon(Icons.more_vert),
           ),
         ],
       ),
       body: Column(
         children: [
-          for (final category in [
-            ('announcement', '公告', Icons.campaign_outlined),
-            ('moderation', '审核与举报', Icons.verified_user_outlined),
-            ('reply', '帖子回复', Icons.forum_outlined),
-          ])
-            ListTile(
-              leading: Icon(category.$3),
-              title: Text(category.$2),
-              trailing: Badge(
-                isLabelVisible:
-                    _userId != null &&
-                    (_systemCounts[category.$1] as int? ?? 0) > 0,
-                label: Text((_systemCounts[category.$1] ?? 0).toString()),
-                child: const Icon(Icons.chevron_right),
-              ),
-              onTap: _busy
-                  ? null
-                  : () async {
-                      if (_api == null || _userId == null) {
-                        await _login();
-                        return;
-                      }
-                      await Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => SystemInboxPage(
-                            api: _api!,
-                            category: category.$1,
-                            title: category.$2,
-                          ),
-                        ),
-                      );
-                      if (mounted && widget.active) {
-                        await _load(reset: true, silent: true);
-                      }
-                    },
-            ),
-          const Divider(height: 1),
+          MessageInboxShortcuts(
+            counts: _systemCounts,
+            showUnread: _userId != null,
+            onOpen: _busy ? null : _openSystemInbox,
+          ),
           Expanded(
             child: _items.isEmpty
                 ? Center(
@@ -433,51 +424,8 @@ class _MessagesPageState extends State<MessagesPage>
                           );
                         }
                         final item = _items[index];
-                        return ListTile(
-                          leading: UserAvatar(
-                            url:
-                                (item['peer'] as Map?)?['avatar_url']
-                                    as String?,
-                            radius: 22,
-                            backgroundColor: Theme.of(
-                              context,
-                            ).colorScheme.surface,
-                          ),
-                          title: Row(
-                            children: [
-                              if (item['pinned'] == true)
-                                const Padding(
-                                  padding: EdgeInsets.only(right: 6),
-                                  child: Icon(Icons.push_pin, size: 16),
-                                ),
-                              Expanded(
-                                child: Text('用户 #${item['peer_user_id']}'),
-                              ),
-                            ],
-                          ),
-                          subtitle: Text('共 ${item['last_seq']} 条消息'),
-                          tileColor: item['pinned'] == true
-                              ? Theme.of(
-                                  context,
-                                ).colorScheme.primary.withValues(alpha: 0.06)
-                              : null,
-                          trailing: Badge(
-                            isLabelVisible:
-                                (item['unread_count'] as int? ?? 0) > 0,
-                            label: item['muted'] == true
-                                ? null
-                                : Text(
-                                    (item['unread_count'] as int? ?? 0) > 99
-                                        ? '99+'
-                                        : (item['unread_count'] ?? 0)
-                                              .toString(),
-                                  ),
-                            child: Icon(
-                              item['muted'] == true
-                                  ? Icons.notifications_off_outlined
-                                  : Icons.chevron_right,
-                            ),
-                          ),
+                        return DmConversationTile(
+                          conversation: item,
                           onTap: _busy ? null : () => _open(item),
                         );
                       },

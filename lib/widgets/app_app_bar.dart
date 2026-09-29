@@ -95,6 +95,7 @@ class AppScaffold extends StatelessWidget {
   final bool automaticallyImplyLeading;
   final bool resizeToAvoidBottomInset;
   final Color? backgroundColor;
+  final Color? appBarBackgroundColor;
   final VoidCallback? onBack;
 
   const AppScaffold({
@@ -106,6 +107,7 @@ class AppScaffold extends StatelessWidget {
     this.automaticallyImplyLeading = true,
     this.resizeToAvoidBottomInset = true,
     this.backgroundColor,
+    this.appBarBackgroundColor,
     this.onBack,
   });
 
@@ -119,6 +121,7 @@ class AppScaffold extends StatelessWidget {
         children: [
           AppAppBar(
             title: title,
+            backgroundColor: appBarBackgroundColor,
             trailing: trailing,
             leading: leading,
             onBack: onBack,

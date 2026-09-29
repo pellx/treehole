@@ -387,3 +387,5 @@ dart analyze          # 静态分析（CI 必须通过）
 补齐消息写入锁表与权限的手动 SQL 见 [MESSAGE_PUBLISH_LOCK_FIX.md](deploy/MESSAGE_PUBLISH_LOCK_FIX.md)。
 
 首次启动后，未开启系统通知时显示一次“开启消息通知”确认弹窗；确认后请求系统授权。显示前在 Hive 的 dm_notification_preferences 中保存 startup_prompt_seen 标记，因此取消、关闭或拒绝授权后，后续启动也不再提醒；已有权限或以前已请求过授权的用户跳过提示。标记按本机安装保存，与账号无关，卸载或清除应用数据后会重置。
+
+消息页排版、会话摘要与后端启用步骤见 [MESSAGE_LIST_LAYOUT_DEPLOY.md](deploy/MESSAGE_LIST_LAYOUT_DEPLOY.md)。布局尺寸与颜色继续集中在 lib/theme/app_messages_theme.dart。
