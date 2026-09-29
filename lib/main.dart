@@ -4,19 +4,23 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'app.dart';
 import 'services/binding_cache.dart';
 import 'services/storage.dart';
-import 'services/startup_frame.dart';
+import 'services/startup_posts.dart';
 import 'services/timezone_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  final launchTimer = Stopwatch()..start();
   await Hive.initFlutter();
 
-  // 两套 Hive box 并行打开，缩短启动阻塞
-  await Future.wait([
-    PostStorage.init(),
-    BindingCache.init(),
-    TimezoneService.init(),
-  ]);
-  StartupFrame.defer();
+  final postsReady = PostStorage.init();
+  final bindingReady = BindingCache.init();
+  final timezoneReady = TimezoneService.init();
+  await postsReady;
+  // Start fetching before building the UI, while the native launch screen remains.
+  StartupPosts.start();
+  await Future.wait([bindingReady, timezoneReady]);
+  // The launch screen lasts at least one second; essential local data may take longer.
+  final remaining = const Duration(seconds: 1) - launchTimer.elapsed;
+  if (remaining > Duration.zero) await Future.delayed(remaining);
   runApp(TreeholeApp(key: appKey));
 }

@@ -9,13 +9,14 @@ import '../../models/post.dart';
 import '../../models/post_meta.dart';
 import '../../services/api.dart';
 import '../../services/storage.dart';
-import '../../services/startup_frame.dart';
+import '../../services/startup_posts.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_dimens.dart';
 import '../../theme/app_square_refresh_theme.dart';
 import '../../theme/app_square_top_bar_theme.dart';
 import '../../widgets/app_empty_state.dart';
 import '../../widgets/app_error_state.dart';
+import '../../widgets/app_loading_indicator.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/image_overlay.dart';
 import '../../widgets/live_pop_scope.dart';
@@ -70,17 +71,14 @@ class SquarePageState extends State<SquarePage> with SquarePageStateMixin {
     final topBar = _buildTopBar(colors, onSurface);
 
     if ((_initializing || _loading) && _posts.isEmpty) {
-      return ColoredBox(
+      return Container(
         color: colors.common.background,
-        child: Stack(
-          children: [
-            CustomScrollView(
-              slivers: [
-                topBar,
-                const SliverFillRemaining(child: SizedBox.shrink()),
-              ],
+        child: CustomScrollView(
+          slivers: [
+            topBar,
+            const SliverFillRemaining(
+              child: AppLoadingCenter(message: '加载中...稍等一会'),
             ),
-            const Center(child: CircularProgressIndicator()),
           ],
         ),
       );

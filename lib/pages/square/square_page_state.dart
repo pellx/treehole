@@ -8,6 +8,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
   Map<int, String> _updateAtById = {};
 
   int _loadedCount = 0;
+  int _loadGeneration = 0;
   bool _loading = false;
   bool _initializing = true;
   String? _error;
@@ -115,7 +116,28 @@ mixin SquarePageStateMixin on State<SquarePage> {
   void initState() {
     super.initState();
     PostStorage.visibilityRevision.addListener(_purgeHidden);
-    _initLoad();
+    final ready = StartupPosts.takeReadySnapshot();
+    if (ready == null) {
+      _initLoad();
+    } else {
+      _allIds = [for (final meta in ready.list.items) meta.id];
+      _updateAtById = {
+        for (final meta in ready.list.items) meta.id: meta.updateAt,
+      };
+      _posts = ready.posts
+          .where((post) => !PostStorage.isPostHidden(post.id))
+          .toList();
+      _loadedCount = ready.list.items.take(7).length;
+      for (final post in _posts) {
+        final cachedComments = PostStorage.getComments(post.comments);
+        _comments[post.id] = cachedComments;
+        if (cachedComments.length < post.comments.length) {
+          _postsNeedCommentRefresh.add(post.id);
+        }
+      }
+      _initializing = false;
+      unawaited(PostStorage.saveIdList(_allIds));
+    }
   }
 
   @override
@@ -148,13 +170,20 @@ mixin SquarePageStateMixin on State<SquarePage> {
   // 第二次打开时，Hive 里的旧帖子秒出，新帖子从 API 补。
   //
   Future<void> _initLoad() async {
+    final generation = ++_loadGeneration;
     final category = _currentCategory;
     try {
-      final res = await ApiService.getIdListV2(category: category);
+      final preloaded = category == null ? StartupPosts.takeList() : null;
+      final res =
+          await (preloaded ?? ApiService.getIdListV2(category: category));
+      if (!mounted || generation != _loadGeneration) return;
+      if (res == null) throw StateError('启动帖子列表获取失败');
       _allIds = [for (final m in res.items) m.id];
       _updateAtById = {for (final m in res.items) m.id: m.updateAt};
       if (category == null) await PostStorage.saveIdList(_allIds);
+      if (!mounted || generation != _loadGeneration) return;
     } catch (_) {
+      if (!mounted || generation != _loadGeneration) return;
       _allIds = category == null ? PostStorage.getIdList() : [];
       _updateAtById = {};
     }
@@ -165,7 +194,6 @@ mixin SquarePageStateMixin on State<SquarePage> {
         _initializing = false;
         _error = '加载失败，请检查网络';
       });
-      StartupFrame.ready();
       return;
     }
 
@@ -174,6 +202,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
     try {
       await _loadMore();
     } catch (_) {
+      if (!mounted || generation != _loadGeneration) return;
       if (mounted) {
         setState(() {
           _loading = false;
@@ -182,6 +211,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
         });
       }
     }
+    if (!mounted || generation != _loadGeneration) return;
 
     if (_posts.isEmpty) {
       setState(() {
@@ -190,7 +220,6 @@ mixin SquarePageStateMixin on State<SquarePage> {
       });
     }
     if (mounted) setState(() => _initializing = false);
-    StartupFrame.ready();
   }
 
   // ---- 加载下一批帖子（7 篇）----
@@ -216,6 +245,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
 
   Future<void> _loadMore() async {
     if (_loading) return;
+    final generation = _loadGeneration;
     final batch = _allIds
         .skip(_loadedCount)
         .take(7)
@@ -229,14 +259,15 @@ mixin SquarePageStateMixin on State<SquarePage> {
     }
 
     final futures = batch.map((id) async {
+      final preloaded = StartupPosts.takePost(id);
       final cached = PostStorage.getPost(id);
       // 缓存未过期 → 直接使用，不再发任何复查请求
       if (cached != null && _isCacheFresh(cached)) {
         return (post: cached, fresh: false, upToDate: true);
       }
-      final post = await ApiService.getPostV2(id);
+      final post = await (preloaded ?? ApiService.getPostV2(id));
       if (post != null) {
-        await PostStorage.savePost(post);
+        if (preloaded == null) await PostStorage.savePost(post);
         return (post: post, fresh: true, upToDate: false);
       }
       // 拉取失败回退缓存（断网时仍可显示），评论走原复查逻辑
@@ -246,6 +277,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
     final order = _buildOrderMap();
     for (int i = 0; i < futures.length; i++) {
       final result = await futures[i];
+      if (!mounted || generation != _loadGeneration) return;
       final post = result.post;
       _loadingIds.remove(batch[i]);
       if (post != null &&
