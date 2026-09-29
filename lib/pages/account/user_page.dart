@@ -124,6 +124,7 @@ class _UserPageState extends State<UserPage> {
       if (_dismissAvatarProgress == dismiss) _dismissAvatarProgress = null;
     }
   }
+
   Future<void> _pickAvatar() async {
     if (_choosingAvatar || _uploadingAvatar) return;
     final generation = _accountGeneration;
@@ -144,7 +145,11 @@ class _UserPageState extends State<UserPage> {
       final path = result?.files.single.path;
       if (path == null) return;
       preparedAvatar = await AvatarCropper.crop(path, theme: Theme.of(context));
-      if (!mounted || generation != _accountGeneration || preparedAvatar == null) return;
+      if (!mounted ||
+          generation != _accountGeneration ||
+          preparedAvatar == null) {
+        return;
+      }
       setState(() => _uploadingAvatar = true);
       final url = await _uploadAvatarWithToast(
         preparedAvatar,
@@ -464,6 +469,7 @@ class _UserPageState extends State<UserPage> {
       }
       await DeviceCredentialStore.saveUserExternalToken(result.userToken);
       await DeviceCredentialStore.mergeKnownUserTokens([result.userToken]);
+      notifyAccountDisplayChanged();
       setState(() => _externalToken = result.userToken);
       if (!mounted) return;
       showAppToast(
@@ -536,7 +542,8 @@ class _UserPageState extends State<UserPage> {
     HapticFeedback.lightImpact();
     final colors = Theme.of(context).extension<AppColors>()!;
     final onSurface = Theme.of(context).colorScheme.onSurface;
-    const message = '退出后本机将清除该账户的登录凭证\n'
+    const message =
+        '退出后本机将清除该账户的登录凭证\n'
         '再次使用需重新注册或短信验证码登录\n是否退出登录？';
     final confirmed = await showDialog<bool>(
       context: context,
@@ -569,17 +576,21 @@ class _UserPageState extends State<UserPage> {
                         onPressed: () => Navigator.of(ctx).pop(false),
                         style: TextButton.styleFrom(
                           foregroundColor: onSurface.withValues(
-                              alpha: AccentDimens.dialogCancelTextAlpha),
+                            alpha: AccentDimens.dialogCancelTextAlpha,
+                          ),
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: AccentDimens.dialogActionHPadding),
+                            horizontal: AccentDimens.dialogActionHPadding,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(
-                                AccentDimens.dialogActionRadius),
+                              AccentDimens.dialogActionRadius,
+                            ),
                           ),
                           textStyle: const TextStyle(
-                              fontSize: AccentDimens.dialogActionFontSize),
+                            fontSize: AccentDimens.dialogActionFontSize,
+                          ),
                         ),
                         child: const Text('取消'),
                       ),
@@ -598,13 +609,16 @@ class _UserPageState extends State<UserPage> {
                           minimumSize: Size.zero,
                           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           padding: const EdgeInsets.symmetric(
-                              horizontal: AccentDimens.dialogActionHPadding),
+                            horizontal: AccentDimens.dialogActionHPadding,
+                          ),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(
-                                AccentDimens.dialogActionRadius),
+                              AccentDimens.dialogActionRadius,
+                            ),
                           ),
                           textStyle: const TextStyle(
-                              fontSize: AccentDimens.dialogActionFontSize),
+                            fontSize: AccentDimens.dialogActionFontSize,
+                          ),
                         ),
                         child: const Text('退出'),
                       ),
@@ -633,36 +647,33 @@ class _UserPageState extends State<UserPage> {
     final isLight = Theme.of(context).brightness == Brightness.light;
     final isRegistered = PostStorage.isRegistered();
 
-    final pageBg = isLight
-        ? const Color(0xFFF2F2F2)
-        : const Color(0xFF111111);
+    final pageBg = isLight ? const Color(0xFFF2F2F2) : const Color(0xFF111111);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle(
         statusBarColor: pageBg,
-        statusBarIconBrightness:
-            isLight ? Brightness.dark : Brightness.light,
+        statusBarIconBrightness: isLight ? Brightness.dark : Brightness.light,
       ),
       child: Scaffold(
         backgroundColor: pageBg,
         body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: () {
-          if (_editingName && !_submittingName) _exitNameEditing();
-        },
-        child: SafeArea(
-          child: CustomScrollView(
-            physics: const ClampingScrollPhysics(),
-            slivers: [
-              SliverFillRemaining(
-                hasScrollBody: false,
-                // 不设垂直 padding，让首尾卡片贴边：内容放得下时 scrollExtent
-                // 与视口等长（min==max），ClampingScrollPhysics 会直接禁用拖动，
-                // 不会再出现拉伸形变
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Center(
-                    child: Column(
+          behavior: HitTestBehavior.translucent,
+          onTap: () {
+            if (_editingName && !_submittingName) _exitNameEditing();
+          },
+          child: SafeArea(
+            child: CustomScrollView(
+              physics: const ClampingScrollPhysics(),
+              slivers: [
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  // 不设垂直 padding，让首尾卡片贴边：内容放得下时 scrollExtent
+                  // 与视口等长（min==max），ClampingScrollPhysics 会直接禁用拖动，
+                  // 不会再出现拉伸形变
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Center(
+                      child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           _profileCard(colors, onSurface),
@@ -745,12 +756,12 @@ class _UserPageState extends State<UserPage> {
                     ),
                   ),
                 ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
   }
 
   // ---- 个人资料卡片 ----
@@ -788,7 +799,9 @@ class _UserPageState extends State<UserPage> {
       child: Row(
         children: [
           GestureDetector(
-            onTap: _uploadingAvatar ? null : (isRegistered ? _pickAvatar : _openRegister),
+            onTap: _uploadingAvatar
+                ? null
+                : (isRegistered ? _pickAvatar : _openRegister),
             child: UserAvatar(
               url: _avatarUrl,
               radius: 36,

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../services/dm_api.dart';
+import '../../services/account_display.dart';
 import '../../services/dm_notifications.dart';
 import '../../services/dm_inbox.dart';
 import '../../services/realtime_service.dart';
@@ -42,6 +43,15 @@ class _MessagesPageState extends State<MessagesPage>
   bool _requiresLogin = false;
   bool _notificationsEnabled = false;
 
+  Future<void> _prefetchSystemInboxes(DmApi api) async {
+    await Future.wait([
+      for (final category in ['reply', 'announcement', 'moderation'])
+        api
+            .systemRequest('?category=$category')
+            .then((_) {}, onError: (Object _) {}),
+    ]);
+  }
+
   Future<void> _refreshNotificationPermission() async {
     try {
       final enabled = await DmNotifications.permissionEnabled();
@@ -53,14 +63,13 @@ class _MessagesPageState extends State<MessagesPage>
   void initState() {
     super.initState();
     _realtimeSubscription = RealtimeService.instance.dmEvents.listen((event) {
-      if (!mounted ||
-          !widget.active ||
-          _api == null ||
-          event.sessionId != _api!.sessionId) {
+      if (!mounted || _api == null || event.sessionId != _api!.sessionId) {
         return;
       }
       if (ModalRoute.of(context)?.isCurrent != true) return;
-      if (event.notify) showAppToast(context, message: '收到一条新私信');
+      if (event.notify && widget.active) {
+        showAppToast(context, message: '收到一条新私信');
+      }
       if (_busy) {
         _refreshPending = true;
         return;
@@ -68,38 +77,52 @@ class _MessagesPageState extends State<MessagesPage>
       _load(reset: true, silent: true);
     });
     WidgetsBinding.instance.addObserver(this);
+    accountDisplayEpoch.addListener(_accountChanged);
     unawaited(_refreshNotificationPermission());
-    if (widget.active) _scheduleReload();
+    _scheduleReload();
   }
 
   void _scheduleReload() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && widget.active) _load(reset: true, silent: true);
+      if (!mounted) return;
+      if (_busy) {
+        _refreshPending = true;
+      } else {
+        _load(reset: true, silent: true);
+      }
     });
+  }
+
+  void _accountChanged() {
+    if (!mounted) return;
+    _generation++;
+    _api?.close();
+    _api = null;
+    setState(() {
+      _busy = false;
+      _initializing = true;
+      _items.clear();
+      _userId = null;
+      _next = null;
+      _nextPinned = 0;
+      _systemCounts = {};
+      _refreshPending = false;
+    });
+    _scheduleReload();
   }
 
   @override
   void didUpdateWidget(covariant MessagesPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.active != oldWidget.active) {
-      _generation++;
-      _busy = false;
-      _initializing = true;
-      _items.clear();
-      _userId = null;
-      _api?.close();
-      _api = null;
-      if (widget.active) {
-        _scheduleReload();
-        unawaited(_refreshNotificationPermission());
-      }
+    if (widget.active && !oldWidget.active) {
+      _scheduleReload();
+      unawaited(_refreshNotificationPermission());
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed &&
-        widget.active &&
         ModalRoute.of(context)?.isCurrent == true) {
       _load(reset: true, silent: true);
       unawaited(_refreshNotificationPermission());
@@ -163,11 +186,15 @@ class _MessagesPageState extends State<MessagesPage>
           });
         }
         _api = api;
+        unawaited(_prefetchSystemInboxes(api));
       }
-      final data = await _api!.request(
+      if (!mounted || generation != _generation || _api == null) return;
+      final api = _api!;
+      final data = await api.request(
         'conversations${!reset && _next != null ? '?before_id=$_next&before_pinned=$_nextPinned' : ''}',
       );
-      final summary = await _api!.systemRequest('summary');
+      if (!mounted || generation != _generation) return;
+      final summary = await api.systemRequest('summary');
       if (!mounted || generation != _generation) return;
       setState(() {
         _items.clear();
@@ -177,7 +204,7 @@ class _MessagesPageState extends State<MessagesPage>
         _nextPinned = data['next_before_pinned'] as int? ?? 0;
         _systemCounts = summary['counts'] as Map<String, dynamic>;
       });
-      unawaited(DmInbox.refresh());
+      if (widget.active) unawaited(DmInbox.refresh());
     } catch (error) {
       if (mounted && generation == _generation) {
         setState(() {
@@ -197,7 +224,7 @@ class _MessagesPageState extends State<MessagesPage>
           _busy = false;
           _initializing = false;
         });
-        if (_refreshPending && widget.active) {
+        if (_refreshPending) {
           _refreshPending = false;
           _load(reset: true, silent: true);
         }
@@ -222,7 +249,7 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _open(Map<String, dynamic> conversation) async {
-    if (_busy || _api == null || _userId == null) return;
+    if (_api == null || _userId == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => DmChatPage(
@@ -237,7 +264,7 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _openSystemInbox(String category, String title) async {
-    if (_busy || _openingSystemInbox) return;
+    if (_openingSystemInbox || (_busy && _api == null)) return;
     if (_api == null || _userId == null) {
       await _login();
       return;
@@ -344,6 +371,7 @@ class _MessagesPageState extends State<MessagesPage>
     _generation++;
     _realtimeSubscription?.cancel();
     _api?.close();
+    accountDisplayEpoch.removeListener(_accountChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -424,7 +452,9 @@ class _MessagesPageState extends State<MessagesPage>
               MessageInboxShortcuts(
                 counts: _systemCounts,
                 showUnread: _userId != null,
-                onOpen: _busy || _openingSystemInbox ? null : _openSystemInbox,
+                onOpen: _openingSystemInbox || (_busy && _api == null)
+                    ? null
+                    : _openSystemInbox,
               ),
               Expanded(
                 child: _items.isEmpty
@@ -470,7 +500,7 @@ class _MessagesPageState extends State<MessagesPage>
                             return DmConversationTile(
                               conversation: item,
                               isFirst: index == 0,
-                              onTap: _busy ? null : () => _open(item),
+                              onTap: _api == null ? null : () => _open(item),
                             );
                           },
                         ),

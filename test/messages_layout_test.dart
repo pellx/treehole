@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show ImageByteFormat;
 
@@ -8,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:treehole/pages/messages/messages_page.dart';
 import 'package:treehole/services/dm_api.dart';
 import 'package:treehole/services/dm_notifications.dart';
+import 'package:treehole/services/account_display.dart';
 import 'package:treehole/theme/app_colors.dart';
 import 'package:treehole/theme/app_messages_theme.dart';
 import 'package:treehole/widgets/app_app_bar.dart';
@@ -83,9 +85,126 @@ class _LayoutApi implements DmApi {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class _RetainedApi implements DmApi {
+  final refresh = Completer<Map<String, dynamic>>();
+  int conversationCalls = 0;
+  final systemPaths = <String>[];
+
+  @override
+  int get sessionId => 12;
+  @override
+  String get accountToken => 'retained-test';
+  @override
+  Future<Map<String, dynamic>> request(
+    String path, {
+    Map<String, dynamic>? body,
+  }) {
+    if (!path.startsWith('conversations')) return Future.value({});
+    conversationCalls++;
+    if (conversationCalls > 1) return refresh.future;
+    return Future.value({
+      'user_id': 1,
+      'items': [
+        {
+          'id': 7,
+          'peer_user_id': 8,
+          'peer': {'user_display_id': '后台预载的会话'},
+          'last_message': {'content': '上一条私信'},
+          'unread_count': 0,
+        },
+      ],
+      'next_before_id': null,
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>> systemRequest(
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    systemPaths.add(path);
+    return path == 'summary'
+        ? {
+            'counts': {'reply': 0, 'announcement': 0, 'moderation': 0},
+          }
+        : {'items': <Map<String, dynamic>>[], 'next_before_id': null};
+  }
+
+  @override
+  void close() {}
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 void main() {
   tearDown(() {
     DmNotifications.debugPermissionStatus = null;
+  });
+
+  testWidgets('messages load offscreen and remain visible during tab refresh', (
+    tester,
+  ) async {
+    DmNotifications.debugPermissionStatus = () async => false;
+    final api = _RetainedApi();
+    final active = ValueNotifier(false);
+    addTearDown(active.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: const [AppColors.light]),
+        home: ValueListenableBuilder<bool>(
+          valueListenable: active,
+          builder: (context, value, _) => MessagesPage(api: api, active: value),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('后台预载的会话'), findsOneWidget);
+    expect(api.conversationCalls, 1);
+    expect(
+      api.systemPaths,
+      containsAll([
+        '?category=reply',
+        '?category=announcement',
+        '?category=moderation',
+      ]),
+    );
+
+    active.value = true;
+    await tester.pump();
+    await tester.pump();
+    expect(api.conversationCalls, 2);
+    expect(find.text('后台预载的会话'), findsOneWidget);
+    api.refresh.complete({
+      'user_id': 1,
+      'items': <Map<String, dynamic>>[],
+      'next_before_id': null,
+    });
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('account change immediately clears the previous inbox', (
+    tester,
+  ) async {
+    DmNotifications.debugPermissionStatus = () async => false;
+    final api = _RetainedApi();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: const [AppColors.light]),
+        home: MessagesPage(api: api),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('后台预载的会话'), findsOneWidget);
+
+    accountDisplayEpoch.value++;
+    await tester.pump();
+    expect(find.text('后台预载的会话'), findsNothing);
+    api.refresh.complete({
+      'user_id': 2,
+      'items': <Map<String, dynamic>>[],
+      'next_before_id': null,
+    });
+    await tester.pumpAndSettle();
   });
 
   for (final dark in [false, true]) {
