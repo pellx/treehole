@@ -44,11 +44,7 @@ class DmConversationTile extends StatelessWidget {
     final content = (lastMessage?['content'] as String?)
         ?.replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    final preview = content != null && content.isNotEmpty
-        ? content
-        : (conversation['last_seq'] as int? ?? 0) > 0
-        ? '共 ${conversation['last_seq']} 条消息'
-        : '暂无消息';
+    final preview = content ?? '';
     final time = _time(
       (lastMessage?['created_at'] ?? conversation['updated_at']) as String?,
     );
@@ -139,14 +135,24 @@ class DmConversationTile extends StatelessWidget {
                           Row(
                             children: [
                               Expanded(
-                                child: Text(
-                                  preview,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: AppMessagesTheme
-                                        .conversationPreviewFontSize,
-                                    color: secondary,
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: AppMessagesTheme
+                                          .conversationPreviewMaxWidth,
+                                    ),
+                                    child: Text(
+                                      preview,
+                                      maxLines: 1,
+                                      softWrap: false,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: AppMessagesTheme
+                                            .conversationPreviewFontSize,
+                                        color: secondary,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),

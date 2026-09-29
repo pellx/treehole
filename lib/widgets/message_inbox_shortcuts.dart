@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_messages_theme.dart';
 
-/// 顶部三个系统消息入口：回复、公告、审核与举报。
+/// 顶部三个系统消息入口：回复、公告、审核。
 class MessageInboxShortcuts extends StatelessWidget {
   final Map<String, dynamic> counts;
   final bool showUnread;
@@ -32,6 +32,7 @@ class MessageInboxShortcuts extends StatelessWidget {
           for (final category in [
             (
               'reply',
+              '回复',
               '帖子回复',
               Icons.chat_bubble_rounded,
               AppMessagesTheme.replyIconColor,
@@ -39,11 +40,13 @@ class MessageInboxShortcuts extends StatelessWidget {
             (
               'announcement',
               '公告',
+              '公告',
               Icons.campaign_rounded,
               AppMessagesTheme.announcementIconColor,
             ),
             (
               'moderation',
+              '审核',
               '审核与举报',
               Icons.verified_user_rounded,
               AppMessagesTheme.moderationIconColor,
@@ -54,7 +57,7 @@ class MessageInboxShortcuts extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
                 onTap: onOpen == null
                     ? null
-                    : () => onOpen!(category.$1, category.$2),
+                    : () => onOpen!(category.$1, category.$3),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     vertical: AppMessagesTheme.shortcutItemVerticalPadding,
@@ -92,9 +95,9 @@ class MessageInboxShortcuts extends StatelessWidget {
                             ),
                           ),
                           child: Icon(
-                            category.$3,
+                            category.$4,
                             size: AppMessagesTheme.shortcutIconSize,
-                            color: category.$4,
+                            color: category.$5,
                           ),
                         ),
                       ),

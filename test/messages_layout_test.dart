@@ -123,14 +123,29 @@ void main() {
         );
         expect(find.byType(MessageInboxShortcuts), findsOneWidget);
         expect(find.byType(DmConversationTile), findsNWidgets(3));
-        final reply = tester.getCenter(find.text('帖子回复'));
+        final reply = tester.getCenter(find.text('回复'));
         final announcement = tester.getCenter(find.text('公告'));
-        final moderation = tester.getCenter(find.text('审核与举报'));
+        final moderation = tester.getCenter(find.text('审核'));
         expect(reply.dx, lessThan(announcement.dx));
         expect(announcement.dx, lessThan(moderation.dx));
         expect(find.text('林同学'), findsOneWidget);
         expect(find.text('可以的，我们明天再聊。'), findsOneWidget);
+        const longPreview = '这是一条很长的消息，用来确认小屏幕上摘要不会挤占时间和未读标记。';
+        final preview = tester.widget<Text>(find.text(longPreview));
+        expect(preview.maxLines, 1);
+        expect(preview.softWrap, false);
+        expect(preview.overflow, TextOverflow.ellipsis);
+        expect(
+          tester.getSize(find.text(longPreview)).width,
+          lessThanOrEqualTo(AppMessagesTheme.conversationPreviewMaxWidth),
+        );
         expect(find.text('37'), findsNothing);
+        expect(
+          tester.getRect(find.text('5')).right,
+          greaterThan(
+            tester.getRect(find.byType(DmConversationTile).first).right - 36,
+          ),
+        );
         expect(find.byIcon(Icons.notifications_off_outlined), findsOneWidget);
         expect(find.byIcon(Icons.push_pin), findsOneWidget);
         expect(find.text('消息加载中'), findsNothing);
@@ -138,6 +153,48 @@ void main() {
       },
     );
   }
+
+  testWidgets('short labels open the existing full inbox titles', (
+    tester,
+  ) async {
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: const [AppColors.light]),
+        home: Scaffold(
+          body: MessageInboxShortcuts(
+            counts: const {},
+            showUnread: false,
+            onOpen: (category, title) => opened.add('$category:$title'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('回复'));
+    await tester.tap(find.text('审核'));
+    expect(opened, ['reply:帖子回复', 'moderation:审核与举报']);
+  });
+
+  testWidgets('a conversation never falls back to a message count', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: const [AppColors.light]),
+        home: const Scaffold(
+          body: DmConversationTile(
+            conversation: {
+              'peer_user_id': 2,
+              'peer': {'user_display_id': '对方'},
+              'last_seq': 5,
+              'unread_count': 0,
+            },
+          ),
+        ),
+      ),
+    );
+    expect(find.textContaining('共 5 条消息'), findsNothing);
+  });
 
   testWidgets('render message page at a normal phone size', (tester) async {
     tester.view.physicalSize = const Size(390, 844);

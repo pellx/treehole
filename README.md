@@ -389,3 +389,4 @@ dart analyze          # 静态分析（CI 必须通过）
 首次启动后，未开启系统通知时显示一次“开启消息通知”确认弹窗；确认后请求系统授权。显示前在 Hive 的 dm_notification_preferences 中保存 startup_prompt_seen 标记，因此取消、关闭或拒绝授权后，后续启动也不再提醒；已有权限或以前已请求过授权的用户跳过提示。标记按本机安装保存，与账号无关，卸载或清除应用数据后会重置。
 
 消息页排版、会话摘要与后端启用步骤见 [MESSAGE_LIST_LAYOUT_DEPLOY.md](deploy/MESSAGE_LIST_LAYOUT_DEPLOY.md)。布局尺寸与颜色继续集中在 lib/theme/app_messages_theme.dart；常调的纵向参数包括 headerHeight、headerTitleOffsetY、clearUnreadOffsetY、moreActionsOffsetY、shortcutTopPadding、shortcutItemVerticalPadding、shortcutLabelGap、shortcutBottomPadding、conversationVerticalPadding、conversationTextGap 和 conversationMinHeight。
+\n三个系统入口到会话列表的距离由 shortcutBottomPadding 控制；对话摘要的最大单行宽度由 conversationPreviewMaxWidth 控制。\n
