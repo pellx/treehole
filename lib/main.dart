@@ -4,6 +4,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'app.dart';
 import 'services/binding_cache.dart';
 import 'services/storage.dart';
+import 'services/startup_frame.dart';
 import 'services/timezone_service.dart';
 
 void main() async {
@@ -16,5 +17,6 @@ void main() async {
     BindingCache.init(),
     TimezoneService.init(),
   ]);
+  StartupFrame.defer();
   runApp(TreeholeApp(key: appKey));
 }

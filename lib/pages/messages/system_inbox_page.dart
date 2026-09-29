@@ -10,11 +10,15 @@ class SystemInboxPage extends StatefulWidget {
   final DmApi api;
   final String category;
   final String title;
+  final Map<String, dynamic>? initialData;
+  final bool refreshOnOpen;
   const SystemInboxPage({
     super.key,
     required this.api,
     required this.category,
     required this.title,
+    this.initialData,
+    this.refreshOnOpen = false,
   });
   @override
   State<SystemInboxPage> createState() => _SystemInboxPageState();
@@ -25,6 +29,7 @@ class _SystemInboxPageState extends State<SystemInboxPage>
   final List<Map<String, dynamic>> _items = [];
   int? _next;
   bool _busy = false;
+  bool _initializing = true;
   bool _failed = false;
   bool _pending = false;
   StreamSubscription? _events;
@@ -32,6 +37,13 @@ class _SystemInboxPageState extends State<SystemInboxPage>
   @override
   void initState() {
     super.initState();
+    if (widget.initialData != null) {
+      _items.addAll(
+        (widget.initialData!['items'] as List).cast<Map<String, dynamic>>(),
+      );
+      _next = widget.initialData!['next_before_id'] as int?;
+      _initializing = false;
+    }
     WidgetsBinding.instance.addObserver(this);
     _events = RealtimeService.instance.dmEvents.listen((event) {
       if (event.sessionId == widget.api.sessionId &&
@@ -44,7 +56,9 @@ class _SystemInboxPageState extends State<SystemInboxPage>
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _load(reset: true);
+      if (mounted && (widget.initialData == null || widget.refreshOnOpen)) {
+        _load(reset: true, silent: true);
+      }
     });
   }
 
@@ -65,13 +79,6 @@ class _SystemInboxPageState extends State<SystemInboxPage>
       _busy = true;
       _failed = false;
     });
-    final dismiss = silent
-        ? () {}
-        : showAppToast(
-            context,
-            message: '正在获取消息',
-            duration: const Duration(seconds: 25),
-          );
     try {
       if (_items.isEmpty) {
         try {
@@ -101,7 +108,6 @@ class _SystemInboxPageState extends State<SystemInboxPage>
         _next = data['next_before_id'] as int?;
       });
     } catch (error) {
-      dismiss();
       if (mounted) {
         setState(() {
           _failed = true;
@@ -110,9 +116,11 @@ class _SystemInboxPageState extends State<SystemInboxPage>
         if (!silent) showAppToast(context, message: error.toString());
       }
     } finally {
-      dismiss();
       if (mounted) {
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+          _initializing = false;
+        });
         if (_pending) {
           _pending = false;
           _load(reset: true, silent: true);
@@ -151,7 +159,7 @@ class _SystemInboxPageState extends State<SystemInboxPage>
     ),
     body: _items.isEmpty
         ? Center(
-            child: _busy
+            child: _busy || _initializing
                 ? const SizedBox.shrink()
                 : _failed
                 ? TextButton(

@@ -46,6 +46,7 @@ void main() {
         home: SystemInboxPage(api: api, category: 'moderation', title: '审核与举报'),
       ),
     );
+    expect(find.text('暂无审核与举报'), findsNothing);
     await tester.pumpAndSettle();
     expect(api.reads, isEmpty);
     expect(find.text('审核结果通知'), findsOneWidget);
@@ -56,5 +57,29 @@ void main() {
     await tester.tap(find.byIcon(Icons.arrow_back));
     await tester.pumpAndSettle();
     expect(tester.widget<Badge>(find.byType(Badge)).isLabelVisible, isFalse);
+  });
+
+  testWidgets('prefetched replies are visible on the first frame', (
+    tester,
+  ) async {
+    final api = InboxFake();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(extensions: const [AppColors.light]),
+        home: SystemInboxPage(
+          api: api,
+          category: 'reply',
+          title: '帖子回复',
+          initialData: const {
+            'items': [
+              {'id': 3, 'title': '新回复', 'content': '立即显示', 'is_read': false},
+            ],
+            'next_before_id': null,
+          },
+        ),
+      ),
+    );
+    expect(find.text('新回复'), findsOneWidget);
+    expect(find.text('暂无帖子回复'), findsNothing);
   });
 }

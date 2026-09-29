@@ -28,7 +28,7 @@ class AppMessagesTheme {
   static const double shortcutTopPadding = 22;
 
   /// 三个按钮区域（包括文字）到第一条会话行的距离；越小越靠近会话。
-  static const double shortcutBottomPadding = 10;
+  static const double shortcutBottomPadding = 0;
 
   /// 每个按钮点击区域内部的上下留白，不改变图标底板的尺寸。
   static const double shortcutItemVerticalPadding = 2;
@@ -53,6 +53,10 @@ class AppMessagesTheme {
 
   /// 会话行内部的上下留白，也会影响按钮文字到第一条头像的视觉距离。
   static const double conversationVerticalPadding = 14;
+
+  /// 第一条会话顶部留白；控制三个按钮文字到首条会话的实际距离。
+  /// 与 shortcutBottomPadding 相加决定两块内容之间的空隙。
+  static const double conversationFirstTopPadding = 0;
   static const double conversationAvatarSize = 46;
   static const double conversationAvatarGap = 16;
   static const double conversationTitleFontSize = 17;

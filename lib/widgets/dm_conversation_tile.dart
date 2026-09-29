@@ -8,8 +8,14 @@ import 'user_avatar.dart';
 class DmConversationTile extends StatelessWidget {
   final Map<String, dynamic> conversation;
   final VoidCallback? onTap;
+  final bool isFirst;
 
-  const DmConversationTile({super.key, required this.conversation, this.onTap});
+  const DmConversationTile({
+    super.key,
+    required this.conversation,
+    this.onTap,
+    this.isFirst = false,
+  });
 
   String _time(String? raw) {
     final date = TimezoneService.parseServerDateTime(raw);
@@ -62,15 +68,22 @@ class DmConversationTile extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                minHeight: AppMessagesTheme.conversationMinHeight,
+              constraints: BoxConstraints(
+                minHeight: isFirst ? 0 : AppMessagesTheme.conversationMinHeight,
               ),
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppMessagesTheme.conversationHorizontalPadding,
-                  vertical: AppMessagesTheme.conversationVerticalPadding,
+                padding: EdgeInsets.fromLTRB(
+                  AppMessagesTheme.conversationHorizontalPadding,
+                  isFirst
+                      ? AppMessagesTheme.conversationFirstTopPadding
+                      : AppMessagesTheme.conversationVerticalPadding,
+                  AppMessagesTheme.conversationHorizontalPadding,
+                  AppMessagesTheme.conversationVerticalPadding,
                 ),
                 child: Row(
+                  crossAxisAlignment: isFirst
+                      ? CrossAxisAlignment.start
+                      : CrossAxisAlignment.center,
                   children: [
                     UserAvatar(
                       url: peer?['avatar_url'] as String?,

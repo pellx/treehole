@@ -9,6 +9,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
 
   int _loadedCount = 0;
   bool _loading = false;
+  bool _initializing = true;
   String? _error;
   final Set<int> _loadingIds = {};
   final Map<int, List<Comment>> _comments = {};
@@ -65,6 +66,7 @@ mixin SquarePageStateMixin on State<SquarePage> {
       _postsNeedCommentRefresh.clear();
       _loadingIds.clear();
       _loading = false;
+      _initializing = true;
       _error = null;
     });
     if (_scrollController.hasClients) {
@@ -160,14 +162,26 @@ mixin SquarePageStateMixin on State<SquarePage> {
     if (_allIds.isEmpty) {
       setState(() {
         _loading = false;
+        _initializing = false;
         _error = '加载失败，请检查网络';
       });
+      StartupFrame.ready();
       return;
     }
 
     _posts = [];
     _loadedCount = 0;
-    await _loadMore();
+    try {
+      await _loadMore();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadingIds.clear();
+          _error = '加载失败，请检查网络';
+        });
+      }
+    }
 
     if (_posts.isEmpty) {
       setState(() {
@@ -175,6 +189,8 @@ mixin SquarePageStateMixin on State<SquarePage> {
         _error = '加载失败，请检查网络';
       });
     }
+    if (mounted) setState(() => _initializing = false);
+    StartupFrame.ready();
   }
 
   // ---- 加载下一批帖子（7 篇）----

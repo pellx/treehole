@@ -13,6 +13,7 @@ import 'package:treehole/theme/app_messages_theme.dart';
 import 'package:treehole/widgets/app_app_bar.dart';
 import 'package:treehole/widgets/dm_conversation_tile.dart';
 import 'package:treehole/widgets/message_inbox_shortcuts.dart';
+import 'package:treehole/widgets/user_avatar.dart';
 
 class _LayoutApi implements DmApi {
   @override
@@ -111,6 +112,7 @@ void main() {
             home: MessagesPage(api: _LayoutApi()),
           ),
         );
+        expect(find.text('还没有私信会话'), findsNothing);
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
@@ -123,6 +125,11 @@ void main() {
         );
         expect(find.byType(MessageInboxShortcuts), findsOneWidget);
         expect(find.byType(DmConversationTile), findsNWidgets(3));
+        final shortcutBottom = tester
+            .getRect(find.byType(MessageInboxShortcuts))
+            .bottom;
+        final avatarTop = tester.getRect(find.byType(UserAvatar).first).top;
+        expect(avatarTop - shortcutBottom, lessThanOrEqualTo(4));
         final reply = tester.getCenter(find.text('回复'));
         final announcement = tester.getCenter(find.text('公告'));
         final moderation = tester.getCenter(find.text('审核'));

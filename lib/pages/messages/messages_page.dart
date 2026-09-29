@@ -34,6 +34,8 @@ class _MessagesPageState extends State<MessagesPage>
   Map<String, dynamic> _systemCounts = {};
   int _generation = 0;
   bool _busy = false;
+  bool _initializing = true;
+  bool _openingSystemInbox = false;
   bool _failed = false;
   bool _refreshPending = false;
   StreamSubscription? _realtimeSubscription;
@@ -82,6 +84,7 @@ class _MessagesPageState extends State<MessagesPage>
     if (widget.active != oldWidget.active) {
       _generation++;
       _busy = false;
+      _initializing = true;
       _items.clear();
       _userId = null;
       _api?.close();
@@ -190,7 +193,10 @@ class _MessagesPageState extends State<MessagesPage>
       }
     } finally {
       if (mounted && generation == _generation) {
-        setState(() => _busy = false);
+        setState(() {
+          _busy = false;
+          _initializing = false;
+        });
         if (_refreshPending && widget.active) {
           _refreshPending = false;
           _load(reset: true, silent: true);
@@ -231,15 +237,40 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _openSystemInbox(String category, String title) async {
-    if (_busy) return;
+    if (_busy || _openingSystemInbox) return;
     if (_api == null || _userId == null) {
       await _login();
       return;
     }
+    final api = _api!;
+    final path = '?category=$category';
+    setState(() => _openingSystemInbox = true);
+    Map<String, dynamic>? initialData;
+    var refreshOnOpen = false;
+    try {
+      initialData = await api.cached('system', path);
+      if (initialData == null || (initialData['items'] as List).isEmpty) {
+        initialData = await api.systemRequest(path);
+      } else {
+        refreshOnOpen = true;
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _openingSystemInbox = false);
+      showAppToast(context, message: error.toString());
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _openingSystemInbox = false);
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            SystemInboxPage(api: _api!, category: category, title: title),
+        builder: (_) => SystemInboxPage(
+          api: api,
+          category: category,
+          title: title,
+          initialData: initialData,
+          refreshOnOpen: refreshOnOpen,
+        ),
       ),
     );
     if (mounted && widget.active) await _load(reset: true, silent: true);
@@ -386,62 +417,74 @@ class _MessagesPageState extends State<MessagesPage>
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          MessageInboxShortcuts(
-            counts: _systemCounts,
-            showUnread: _userId != null,
-            onOpen: _busy ? null : _openSystemInbox,
+          Column(
+            children: [
+              MessageInboxShortcuts(
+                counts: _systemCounts,
+                showUnread: _userId != null,
+                onOpen: _busy || _openingSystemInbox ? null : _openSystemInbox,
+              ),
+              Expanded(
+                child: _items.isEmpty
+                    ? Center(
+                        child: _busy || _initializing
+                            ? const SizedBox.shrink()
+                            : Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(_failed ? '暂未获取到会话' : '还没有私信会话'),
+                                  const SizedBox(height: 12),
+                                  if (_userId != null)
+                                    FilledButton(
+                                      onPressed: _create,
+                                      child: const Text('发起私信'),
+                                    ),
+                                  if (_requiresLogin)
+                                    TextButton(
+                                      onPressed: _login,
+                                      child: const Text('登录'),
+                                    ),
+                                  if (_failed)
+                                    TextButton(
+                                      onPressed: () => _load(reset: true),
+                                      child: const Text('重试'),
+                                    ),
+                                ],
+                              ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: () => _load(reset: true),
+                        child: ListView.builder(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          itemCount: _items.length + (_next == null ? 0 : 1),
+                          itemBuilder: (context, index) {
+                            if (index == _items.length) {
+                              return TextButton(
+                                onPressed: _busy ? null : () => _load(),
+                                child: const Text('加载更多会话'),
+                              );
+                            }
+                            final item = _items[index];
+                            return DmConversationTile(
+                              conversation: item,
+                              isFirst: index == 0,
+                              onTap: _busy ? null : () => _open(item),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
           ),
-          Expanded(
-            child: _items.isEmpty
-                ? Center(
-                    child: _busy
-                        ? const SizedBox.shrink()
-                        : Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(_failed ? '暂未获取到会话' : '还没有私信会话'),
-                              const SizedBox(height: 12),
-                              if (_userId != null)
-                                FilledButton(
-                                  onPressed: _create,
-                                  child: const Text('发起私信'),
-                                ),
-                              if (_requiresLogin)
-                                TextButton(
-                                  onPressed: _login,
-                                  child: const Text('登录'),
-                                ),
-                              if (_failed)
-                                TextButton(
-                                  onPressed: () => _load(reset: true),
-                                  child: const Text('重试'),
-                                ),
-                            ],
-                          ),
-                  )
-                : RefreshIndicator(
-                    onRefresh: () => _load(reset: true),
-                    child: ListView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      itemCount: _items.length + (_next == null ? 0 : 1),
-                      itemBuilder: (context, index) {
-                        if (index == _items.length) {
-                          return TextButton(
-                            onPressed: _busy ? null : () => _load(),
-                            child: const Text('加载更多会话'),
-                          );
-                        }
-                        final item = _items[index];
-                        return DmConversationTile(
-                          conversation: item,
-                          onTap: _busy ? null : () => _open(item),
-                        );
-                      },
-                    ),
-                  ),
-          ),
+          if (_openingSystemInbox)
+            const Positioned.fill(
+              child: ColoredBox(
+                color: Color(0x33000000),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            ),
         ],
       ),
     );
