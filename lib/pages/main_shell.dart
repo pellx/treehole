@@ -3,6 +3,7 @@ import '../services/realtime_service.dart';
 import '../services/dm_inbox.dart';
 import '../services/dm_notifications.dart';
 import '../widgets/app_toast.dart';
+import '../widgets/app_confirm_dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -52,6 +53,31 @@ class _MainShellState extends State<MainShell> {
       }
     });
     DmInbox.refresh();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_remindNotificationPermission());
+    });
+  }
+
+  Future<void> _remindNotificationPermission() async {
+    if (!DmNotifications.supportsNotifications) return;
+    try {
+      if (!await DmNotifications.consumeStartupReminder() || !mounted) return;
+      final enabled = await DmNotifications.permissionEnabled();
+      if (!mounted || enabled == true) return;
+      final confirmed = await showAppConfirmDialog(
+        context,
+        title: '开启消息通知',
+        message: '开启消息通知，及时收到新私信提醒。之后也可在消息页点击铃铛调整。',
+        cancelText: '暂不开启',
+        confirmText: '开启通知',
+      );
+      if (!mounted || confirmed != true) return;
+      await DmNotifications.requestPermission();
+    } catch (_) {
+      if (mounted) {
+        showAppToast(context, message: '暂时无法请求通知权限，可在消息页点击铃铛开启');
+      }
+    }
   }
 
   void _connectionChanged() {

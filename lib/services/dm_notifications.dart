@@ -66,6 +66,20 @@ class DmNotifications {
     if (launch?.didNotificationLaunchApp == true) onOpenMessages?.call();
   }
 
+  static bool get supportsNotifications => _supported;
+
+  /// Consume before showing any startup UI, including when permission is already granted.
+  /// This installation-wide flag survives restarts and account switches.
+  static Future<bool> consumeStartupReminder() async {
+    final box = await Hive.openBox('dm_notification_preferences');
+    if (box.get('startup_prompt_seen', defaultValue: false) == true) {
+      return false;
+    }
+    final alreadyRequested = box.get('requested', defaultValue: false) == true;
+    await box.put('startup_prompt_seen', true);
+    return !alreadyRequested;
+  }
+
   static Future<bool?> requestPermission({bool once = false}) async {
     if (!_supported) return false;
     await initialize();
