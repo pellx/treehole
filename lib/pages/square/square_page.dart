@@ -77,7 +77,10 @@ class SquarePageState extends State<SquarePage> with SquarePageStateMixin {
           slivers: [
             topBar,
             const SliverFillRemaining(
-              child: AppLoadingCenter(message: '加载中...稍等一会'),
+              child: AppLoadingCenter(
+                message: '加载中...稍等一会',
+                showIndicator: false,
+              ),
             ),
           ],
         ),

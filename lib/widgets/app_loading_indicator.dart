@@ -39,7 +39,8 @@ class AppLoadingIndicator extends StatelessWidget {
 /// 全屏居中加载
 class AppLoadingCenter extends StatelessWidget {
   final String? message;
-  const AppLoadingCenter({super.key, this.message});
+  final bool showIndicator;
+  const AppLoadingCenter({super.key, this.message, this.showIndicator = true});
 
   @override
   Widget build(BuildContext context) {
@@ -47,9 +48,9 @@ class AppLoadingCenter extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const AppLoadingIndicator(),
+          if (showIndicator) const AppLoadingIndicator(),
           if (message != null) ...[
-            const SizedBox(height: 12),
+            if (showIndicator) const SizedBox(height: 12),
             Text(
               message!,
               style: TextStyle(
