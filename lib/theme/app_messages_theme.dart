@@ -12,24 +12,36 @@ class AppMessagesTheme {
     required this.notificationCheckColor,
   });
 
-  /// 消息页布局参数（逻辑像素），铃铛配色继续沿用下方手动配置。
+  /// 顶栏。颜色沿用旧版浅绿/深绿；所有尺寸单位为逻辑像素。
+  static const Color headerBackgroundLight = Color(0xFFE8F5E9);
+  static const Color headerBackgroundDark = Color(0xFF1B2E1F);
+  static const double headerHeight = 48;
+  static const double headerTitleOffsetY = 0;
+  static const double headerActionIconSize = 24;
+  static const double clearUnreadOffsetY = 0;
+  static const double moreActionsOffsetY = 0;
+
+  /// 三个系统入口的纵向留白。
   static const double shortcutHorizontalPadding = 24;
-  static const double shortcutTopPadding = 22;
-  static const double shortcutBottomPadding = 26;
+  static const double shortcutTopPadding = 12;
+  static const double shortcutBottomPadding = 12;
+  static const double shortcutItemVerticalPadding = 2;
   static const double shortcutSize = 56;
   static const double shortcutRadius = 16;
   static const double shortcutIconSize = 29;
-  static const double shortcutLabelGap = 9;
+  static const double shortcutLabelGap = 6;
   static const double shortcutLabelFontSize = 14;
-  static const double conversationMinHeight = 80;
+
+  /// 私信会话行的高度与内部纵向间距。
+  static const double conversationMinHeight = 68;
   static const double conversationHorizontalPadding = 16;
-  static const double conversationVerticalPadding = 14;
+  static const double conversationVerticalPadding = 10;
   static const double conversationAvatarSize = 46;
   static const double conversationAvatarGap = 16;
   static const double conversationTitleFontSize = 17;
   static const double conversationPreviewFontSize = 14;
   static const double conversationTimeFontSize = 11;
-  static const double conversationTextGap = 5;
+  static const double conversationTextGap = 3;
   static const double conversationTimeMaxWidth = 80;
   static const double conversationDividerIndent =
       conversationHorizontalPadding +

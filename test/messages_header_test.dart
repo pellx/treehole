@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:treehole/pages/messages/messages_page.dart';
 import 'package:treehole/theme/app_colors.dart';
+import 'package:treehole/theme/app_messages_theme.dart';
+import 'package:treehole/widgets/app_app_bar.dart';
 
 void main() {
   tearDown(() {
@@ -47,6 +49,12 @@ void main() {
         ),
       );
       expect(find.text('消息'), findsOneWidget);
+      final header = tester.widget<AppAppBar>(find.byType(AppAppBar));
+      expect(header.backgroundColor, AppMessagesTheme.headerBackgroundLight);
+      expect(header.height, AppMessagesTheme.headerHeight);
+      expect(find.byIcon(Icons.done_all), findsOneWidget);
+      expect(find.byIcon(Icons.cleaning_services_outlined), findsNothing);
+      expect(find.byIcon(Icons.more_vert), findsOneWidget);
       expect(find.byTooltip('一键清理未读'), findsOneWidget);
       expect(find.byTooltip('更多消息操作'), findsOneWidget);
       expect(find.byTooltip('开启消息通知'), findsOneWidget);

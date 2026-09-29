@@ -13,6 +13,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
   final bool automaticallyImplyLeading;
   final Color? backgroundColor;
   final double height;
+  final double titleOffsetY;
 
   const AppAppBar({
     super.key,
@@ -23,6 +24,7 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.automaticallyImplyLeading = true,
     this.backgroundColor,
     this.height = AppDimens.settingsBarHeight,
+    this.titleOffsetY = 0,
   });
 
   @override
@@ -46,12 +48,15 @@ class AppAppBar extends StatelessWidget implements PreferredSizeWidget {
           child: SizedBox(
             height: height,
             child: NavigationToolbar(
-              middle: Text(
-                title,
-                style: TextStyle(
-                  fontSize: AppDimens.settingsBarHeight * 0.354,
-                  fontWeight: FontWeight.w500,
-                  color: barText,
+              middle: Transform.translate(
+                offset: Offset(0, titleOffsetY),
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: AppDimens.settingsBarHeight * 0.354,
+                    fontWeight: FontWeight.w500,
+                    color: barText,
+                  ),
                 ),
               ),
               leading:
@@ -96,6 +101,8 @@ class AppScaffold extends StatelessWidget {
   final bool resizeToAvoidBottomInset;
   final Color? backgroundColor;
   final Color? appBarBackgroundColor;
+  final double appBarHeight;
+  final double appBarTitleOffsetY;
   final VoidCallback? onBack;
 
   const AppScaffold({
@@ -108,6 +115,8 @@ class AppScaffold extends StatelessWidget {
     this.resizeToAvoidBottomInset = true,
     this.backgroundColor,
     this.appBarBackgroundColor,
+    this.appBarHeight = AppDimens.settingsBarHeight,
+    this.appBarTitleOffsetY = 0,
     this.onBack,
   });
 
@@ -122,6 +131,8 @@ class AppScaffold extends StatelessWidget {
           AppAppBar(
             title: title,
             backgroundColor: appBarBackgroundColor,
+            height: appBarHeight,
+            titleOffsetY: appBarTitleOffsetY,
             trailing: trailing,
             leading: leading,
             onBack: onBack,

@@ -328,8 +328,10 @@ class _MessagesPageState extends State<MessagesPage>
           ? AppMessagesTheme.backgroundDark
           : AppMessagesTheme.backgroundLight,
       appBarBackgroundColor: Theme.of(context).brightness == Brightness.dark
-          ? AppMessagesTheme.backgroundDark
-          : AppMessagesTheme.backgroundLight,
+          ? AppMessagesTheme.headerBackgroundDark
+          : AppMessagesTheme.headerBackgroundLight,
+      appBarHeight: AppMessagesTheme.headerHeight,
+      appBarTitleOffsetY: AppMessagesTheme.headerTitleOffsetY,
       automaticallyImplyLeading: false,
       leading: Transform.translate(
         offset: const Offset(
@@ -364,15 +366,23 @@ class _MessagesPageState extends State<MessagesPage>
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: '一键清理未读',
-            onPressed: _clearUnread,
-            icon: const Icon(Icons.cleaning_services_outlined),
+          Transform.translate(
+            offset: const Offset(0, AppMessagesTheme.clearUnreadOffsetY),
+            child: IconButton(
+              tooltip: '一键清理未读',
+              onPressed: _clearUnread,
+              iconSize: AppMessagesTheme.headerActionIconSize,
+              icon: const Icon(Icons.done_all),
+            ),
           ),
-          IconButton(
-            tooltip: '更多消息操作',
-            onPressed: _showActions,
-            icon: const Icon(Icons.more_vert),
+          Transform.translate(
+            offset: const Offset(0, AppMessagesTheme.moreActionsOffsetY),
+            child: IconButton(
+              tooltip: '更多消息操作',
+              onPressed: _showActions,
+              iconSize: AppMessagesTheme.headerActionIconSize,
+              icon: const Icon(Icons.more_vert),
+            ),
           ),
         ],
       ),

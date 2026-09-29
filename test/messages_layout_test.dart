@@ -9,6 +9,8 @@ import 'package:treehole/pages/messages/messages_page.dart';
 import 'package:treehole/services/dm_api.dart';
 import 'package:treehole/services/dm_notifications.dart';
 import 'package:treehole/theme/app_colors.dart';
+import 'package:treehole/theme/app_messages_theme.dart';
+import 'package:treehole/widgets/app_app_bar.dart';
 import 'package:treehole/widgets/dm_conversation_tile.dart';
 import 'package:treehole/widgets/message_inbox_shortcuts.dart';
 
@@ -112,6 +114,13 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
+        final header = tester.widget<AppAppBar>(find.byType(AppAppBar));
+        expect(
+          header.backgroundColor,
+          dark
+              ? AppMessagesTheme.headerBackgroundDark
+              : AppMessagesTheme.headerBackgroundLight,
+        );
         expect(find.byType(MessageInboxShortcuts), findsOneWidget);
         expect(find.byType(DmConversationTile), findsNWidgets(3));
         final reply = tester.getCenter(find.text('帖子回复'));

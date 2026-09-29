@@ -56,7 +56,9 @@ class MessageInboxShortcuts extends StatelessWidget {
                     ? null
                     : () => onOpen!(category.$1, category.$2),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: AppMessagesTheme.shortcutItemVerticalPadding,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
