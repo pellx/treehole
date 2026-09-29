@@ -450,80 +450,95 @@ class _MessagesPageState extends State<MessagesPage>
           Column(
             children: [
               Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () => _load(reset: true),
-                  child: ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount:
-                        1 +
-                        (_items.isEmpty
-                            ? 1
-                            : _items.length + (_next == null ? 0 : 1)),
-                    itemBuilder: (context, index) {
-                      if (index == 0) {
-                        return MessageInboxShortcuts(
-                          counts: _systemCounts,
-                          showUnread: _userId != null,
-                          onOpen: _openingSystemInbox || (_busy && _api == null)
-                              ? null
-                              : _openSystemInbox,
-                        );
-                      }
-                      if (_items.isEmpty) {
-                        if (_busy || _initializing) {
-                          return const SizedBox.shrink();
+                child: Transform.translate(
+                  offset: Offset(
+                    0,
+                    AppMessagesTheme.shortcutTopPadding < 0
+                        ? AppMessagesTheme.shortcutTopPadding
+                        : 0,
+                  ),
+                  child: RefreshIndicator(
+                    onRefresh: () => _load(reset: true),
+                    child: ListView.builder(
+                      padding: EdgeInsets.only(
+                        top: AppMessagesTheme.shortcutTopPadding > 0
+                            ? AppMessagesTheme.shortcutTopPadding
+                            : 0,
+                      ),
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount:
+                          1 +
+                          (_items.isEmpty
+                              ? 1
+                              : _items.length + (_next == null ? 0 : 1)),
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return MessageInboxShortcuts(
+                            counts: _systemCounts,
+                            showUnread: _userId != null,
+                            onOpen:
+                                _openingSystemInbox || (_busy && _api == null)
+                                ? null
+                                : _openSystemInbox,
+                          );
                         }
-                        return Center(
-                          child: Padding(
-                            padding: const EdgeInsets.only(top: 48),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(_failed ? '暂未获取到会话' : '还没有私信会话'),
-                                const SizedBox(height: 12),
-                                if (_userId != null)
-                                  FilledButton(
-                                    onPressed: _create,
-                                    child: const Text('发起私信'),
-                                  ),
-                                if (_requiresLogin)
-                                  TextButton(
-                                    onPressed: _login,
-                                    child: const Text('登录'),
-                                  ),
-                                if (_failed)
-                                  TextButton(
-                                    onPressed: () => _load(reset: true),
-                                    child: const Text('重试'),
-                                  ),
-                              ],
+                        if (_items.isEmpty) {
+                          if (_busy || _initializing) {
+                            return const SizedBox.shrink();
+                          }
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 48),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(_failed ? '暂未获取到会话' : '还没有私信会话'),
+                                  const SizedBox(height: 12),
+                                  if (_userId != null)
+                                    FilledButton(
+                                      onPressed: _create,
+                                      child: const Text('发起私信'),
+                                    ),
+                                  if (_requiresLogin)
+                                    TextButton(
+                                      onPressed: _login,
+                                      child: const Text('登录'),
+                                    ),
+                                  if (_failed)
+                                    TextButton(
+                                      onPressed: () => _load(reset: true),
+                                      child: const Text('重试'),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }
+                        final conversationIndex = index - 1;
+                        if (conversationIndex == _items.length) {
+                          return TextButton(
+                            onPressed: _busy ? null : () => _load(),
+                            child: const Text('加载更多会话'),
+                          );
+                        }
+                        final item = _items[conversationIndex];
+                        final gap =
+                            AppMessagesTheme.conversationFirstTopPadding;
+                        return Padding(
+                          padding: EdgeInsets.only(
+                            top: conversationIndex == 0 && gap > 0 ? gap : 0,
+                          ),
+                          child: Transform.translate(
+                            offset: Offset(0, gap < 0 ? gap : 0),
+                            child: DmConversationTile(
+                              conversation: item,
+                              isFirst: conversationIndex == 0,
+                              onTap: _api == null ? null : () => _open(item),
                             ),
                           ),
                         );
-                      }
-                      final conversationIndex = index - 1;
-                      if (conversationIndex == _items.length) {
-                        return TextButton(
-                          onPressed: _busy ? null : () => _load(),
-                          child: const Text('加载更多会话'),
-                        );
-                      }
-                      final item = _items[conversationIndex];
-                      final gap = AppMessagesTheme.conversationFirstTopPadding;
-                      return Padding(
-                        padding: EdgeInsets.only(
-                          top: conversationIndex == 0 && gap > 0 ? gap : 0,
-                        ),
-                        child: Transform.translate(
-                          offset: Offset(0, gap < 0 ? gap : 0),
-                          child: DmConversationTile(
-                            conversation: item,
-                            isFirst: conversationIndex == 0,
-                            onTap: _api == null ? null : () => _open(item),
-                          ),
-                        ),
-                      );
-                    },
+                      },
+                    ),
                   ),
                 ),
               ),

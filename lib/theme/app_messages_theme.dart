@@ -24,8 +24,8 @@ class AppMessagesTheme {
   /// 三个按钮区域左右两侧到屏幕边缘的距离。
   static const double shortcutHorizontalPadding = 24;
 
-  /// 顶栏下沿到三个按钮区域上沿的距离；越小越靠近顶栏。
-  static const double shortcutTopPadding = 12;
+  /// 顶栏下沿到三个按钮区域上沿的距离；负值会让整个消息列表上移。
+  static const double shortcutTopPadding = -8;
 
   /// 三个按钮区域（包括文字）到第一条会话行的距离；越小越靠近会话。
   static const double shortcutBottomPadding = 0;
@@ -56,7 +56,7 @@ class AppMessagesTheme {
 
   /// 三个按钮到首条会话的纵向偏移；负数让会话列表上移，正数增大间距。
   /// 此处允许负值；不要将它直接传给 Padding（Flutter 不接受负留白）。
-  static const double conversationFirstTopPadding = 24;
+  static const double conversationFirstTopPadding = 26;
   static const double conversationAvatarSize = 46;
   static const double conversationAvatarGap = 16;
   static const double conversationTitleFontSize = 17;
