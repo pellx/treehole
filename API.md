@@ -9,6 +9,24 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
 
 ## 最近更新
 
+### 2026-09（1.2.0）
+
+- **新增私信 API**（[私信 API](#私信-api)）
+  - 会话列表 / 历史 / 发送、已读游标、置顶 / 免打扰 / 拉黑、未读汇总、全量已读、增量状态核对
+  - 发送使用客户端 UUID `client_message_id` 幂等；文本先过审核，未通过不落库、不投递
+- **新增系统消息 API**（[系统消息 API](#系统消息-api)）
+  - `announcement` / `moderation` / `reply` 三类；分类未读摘要、分页列表、单条已读、增量状态核对
+- **新增举报与可见性核对**（[举报 API](#举报-api)、[27b. POST /posts/visibility](#27b-post-postsvisibility)）
+  - 同一内容被 **3 名不同用户**举报后自动隐藏，并向举报人与作者写系统消息
+- **新增头像上传与审核**（[头像 API](#头像-api)）
+  - `POST /user/avatar` 为 multipart；仅接受裁好的 **512×512 JPEG**，审核通过后返回正式 `avatar_url`
+- **发帖 / 回复 v2**（[21b](#21b-post-postsv2)、[22b](#22b-post-postsv2comment)）
+  - `user_id` 由 session 解析，署名实时取 `user_display_id`；v1 `POST /posts`、`POST /posts/comment` 已停用（**410 Gone**）
+  - 新增 `GET /posts/v2/:id`，返回 `hidden` / `hidden_comment_ids`
+- **统一错误码与发布幂等**
+  - `MISSING_SESSION` / `SESSION_INVALID` / `ACCOUNT_BANNED` / `CONTENT_REJECTED`
+  - `x-publish-id` 作为发布/上传重试的幂等键（见 [x-publish-id 约定](#x-publish-id-约定)）
+
 ### 2026-08
 
 - **新增手机号验证码登录/注册/换绑**
@@ -58,13 +76,18 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
   - [20. POST /user/binding/primary-transfer-cancel](#20-post-userbindingprimary-transfer-cancel)
 - [贴文 API](#贴文-api)
   - [21. POST /posts](#21-post-posts)
+  - [21b. POST /posts/v2](#21b-post-postsv2)
   - [22. POST /posts/comment](#22-post-postscomment)
+  - [22b. POST /posts/v2/comment](#22b-post-postsv2comment)
   - [23. GET /posts/idList](#23-get-postsidlist)
   - [23b. GET /posts/idListv2](#23b-get-postsidlistv2)
   - [24. POST /posts/idListUpdate](#24-post-postsidlistupdate)
   - [25. GET /posts/idListByAuthor/:author](#25-get-postsidlistbyauthorauthor)
   - [26. GET /posts/:id](#26-get-postsid)
+  - [26b. GET /posts/v2/:id](#26b-get-postsv2id)
   - [27. GET /posts/comment/:id](#27-get-postscommentid)
+  - [27b. POST /posts/visibility](#27b-post-postsvisibility)
+  - [隐藏内容字段](#隐藏内容字段)
 - [文件 API](#文件-api)
   - [28. POST /file-processor/upload](#28-post-file-processorupload)
   - [29. GET /file-processor/convert/:variant/\*path](#29-get-file-processorconvertvariantpath)
@@ -73,6 +96,30 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
   - [31. GET /versions](#31-get-versions)
 - [其它](#其它)
   - [32. GET /](#32-get-)
+  - [统一错误格式](#统一错误格式)
+  - [x-publish-id 约定](#x-publish-id-约定)
+- [私信 API](#私信-api)
+  - [33. GET /messages/dm/conversations](#33-get-messagesdmconversations)
+  - [34. GET /messages/dm/conversations/:id/messages](#34-get-messagesdmconversationsidmessages)
+  - [35. POST /messages/dm/conversations/:id/messages](#35-post-messagesdmconversationsidmessages)
+  - [36. POST /messages/dm/conversations](#36-post-messagesdmconversations)
+  - [37. POST /messages/dm/conversations/:id/read](#37-post-messagesdmconversationsidread)
+  - [38. GET /messages/dm/conversations/:id/unread](#38-get-messagesdmconversationsidunread)
+  - [39. GET /messages/dm/unread](#39-get-messagesdmunread)
+  - [40. POST /messages/dm/read-all](#40-post-messagesdmread-all)
+  - [41. GET /messages/dm/pinned](#41-get-messagesdmpinned)
+  - [42. POST /messages/dm/conversations/:id/preferences](#42-post-messagesdmconversationsidpreferences)
+  - [43. POST /messages/dm/conversations/state](#43-post-messagesdmconversationsstate)
+  - [私信实时通知](#私信实时通知)
+- [系统消息 API](#系统消息-api)
+  - [44. GET /messages/system/summary](#44-get-messagessystemsummary)
+  - [45. GET /messages/system](#45-get-messagessystem)
+  - [46. POST /messages/system/state](#46-post-messagessystemstate)
+  - [47. POST /messages/system/:id/read](#47-post-messagessystemidread)
+- [举报 API](#举报-api)
+  - [48. POST /posts/reports](#48-post-postsreports)
+- [头像 API](#头像-api)
+  - [49. POST /user/avatar](#49-post-useravatar)
 - [绑定状态说明](#绑定状态说明)
 - [login / binding/create / session/create 对比](#login--bindingcreate--sessioncreate-对比)
 - [附录 A: 设备指纹结构](#附录-a-设备指纹结构)
@@ -645,6 +692,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 ```json
 {
   "user_display_id": "昵称",
+  "avatar_url": "https://www.leisure.xin:33433/user-icon/<uuid>.jpg",
   "display_id_changed_at": "2026-07-01T12:00:00.000Z",
   "token_reset_at": "2026-05-01T12:00:00.000Z",
   "primary_device_id": 5,
@@ -657,6 +705,7 @@ Turnstile 同理：首次 `siteverify` 成功后服务端缓存约 5 分钟，�
 | 字段 | 说明 |
 |---|---|
 | `user_display_id` | 当前显示名 |
+| `avatar_url` | 正式头像地址；未上传/审核未通过为 `null`（见 [头像 API](#头像-api)） |
 | `display_id_changed_at` | 上次改名时间；从未改过为 `null` |
 | `token_reset_at` | 上次令牌重置时间；从未重置过则回退为注册时间 `created_at` |
 | `primary_device_id` | 主设备 id（注册时第一台设备）；不可解绑；旧用户可能为 `null` |
@@ -1275,6 +1324,9 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 
 ### 21. POST /posts
 
+> ⚠️ **已停用（410 Gone）**：服务端 `createPost` 现在直接抛出 `410 旧版匿名发布接口已停用，请使用登录后的 v2 接口`。
+> 新客户端请改用 [21b. POST /posts/v2](#21b-post-postsv2)。以下字段说明仅保留给旧客户端排障。
+
 🔒 创建贴文（含可选图片/附件）。标题+正文会做文本审核。
 
 **请求** `201`（路由未显式设状态码时以实际为准；业务成功返回贴文对象）
@@ -1341,7 +1393,83 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 
 ---
 
+### 21b. POST /posts/v2
+
+🔒 创建贴文（App 端，**当前唯一可用**）。`SessionGuard` + `PublishGuard`：`user_id` 由 session 解析，署名作者取**实时** `users.user_display_id` 落库；请求体**不接受** `author` / `user_id`（全局 `forbidNonWhitelisted` 会直接 400）。
+
+**鉴权**
+
+- `session_id`（int）、`session_secret`（string）为 DTO 必填字段，**即使使用 header 也必须在 body 中带上**，否则 400。
+- 也可用 header `x-session-id` / `x-session-secret`；两者同时存在时 body 优先（`SessionGuard` 先读 body）。
+- 可选 header `x-publish-id`（见 [x-publish-id 约定](#x-publish-id-约定)）。
+
+**请求**（`Content-Type: application/json`）
+
+```json
+{
+  "title": "标题",
+  "content": "正文可选",
+  "category": "问答",
+  "is_anonymous": false,
+  "uploaded": [
+    { "type": "image", "filename": "预上传返回的filename.jpg" },
+    { "type": "attachment", "filename": "xxx.txt", "original": "原始名.txt" }
+  ],
+  "session_id": 1,
+  "session_secret": "64位hex"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `title` | 是 | 字符串，最长 255；不能为空 |
+| `content` | 否 | 字符串；服务端 `trim()` 后落库，缺省空串 |
+| `category` | 否 | `问答` \| `资料` \| `兴趣` \| `梗图` \| `默认`；缺省存「默认」并异步 AI 分类 |
+| `is_anonymous` | 否 | 默认 `false`；`true` 时对外 `author` 为 `null`，但 `user_id` 仍落库 |
+| `uploaded` | 否 | 最多 13 项，结构同 [21](#21-post-posts)：图片 ≤12 张且合计 ≤8MB，单附件 ≤3.5MB |
+| `session_id` / `session_secret` | 是 | 见上方「鉴权」 |
+
+**响应** `201`（Nest POST 默认状态码；返回公开贴文对象，**不含** `user_id`）
+
+```json
+{
+  "is_hidden": false,
+  "id": 100,
+  "title": "标题",
+  "content": "正文",
+  "author": "当前显示名或null",
+  "is_anonymous": false,
+  "category": "默认",
+  "reply_times": 0,
+  "created_at": "2026-09-29T10:00:00.000Z",
+  "update_at": "2000-01-01T00:00:00.000Z",
+  "images": [],
+  "attachments": []
+}
+```
+
+> `is_hidden` 是实体内部字段，未从公开响应中剔除；可见内容固定为 `false`，判断下架请用 [26b](#26b-get-postsv2id) 的 `hidden`。
+
+**错误**
+
+| 状态码 | message / 说明 |
+|---|---|
+| 400 | 文件不存在（`filePath:<路径>、文件 xxx 不存在`）、`图片最多 12 张`、`图片总大小超过 8MB`、`附件 原名 超过 3.5MB` |
+| 400 | `无效的发布请求标识`（`x-publish-id` 非 36 位 UUID 形状） |
+| 400 | 参数校验失败（`message` 为字符串数组，如 `title must be a string`） |
+| 401 | `MISSING_SESSION` / `SESSION_INVALID` |
+| 403 | `ACCOUNT_BANNED`（封禁中）或 `CONTENT_REJECTED`（本次内容未过审），响应体见 [统一错误格式](#统一错误格式) |
+| 500 | `发布失败，请检查数据` |
+| 503 | `内容审核服务暂不可用，请稍后重试` |
+
+审核通过后才会落库并移动预上传文件；失败会回滚并回滚文件位置。
+
+---
+
 ### 22. POST /posts/comment
+
+> ⚠️ **已停用（410 Gone）**：服务端 `createReply` 现在直接抛出 `410 旧版匿名发布接口已停用，请使用登录后的 v2 接口`。
+> 新客户端请改用 [22b. POST /posts/v2/comment](#22b-post-postsv2comment)。
 
 🔒 创建回复/评论。
 
@@ -1373,6 +1501,62 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 ```
 
 成功后所属贴文的 `reply_times` +1，并刷新 `update_at`。
+
+---
+
+### 22b. POST /posts/v2/comment
+
+🔒 创建回复（App 端，**当前唯一可用**）。`SessionGuard` + `PublishGuard`；`user_id` 由 session 解析，署名取实时 `user_display_id`，请求体不接受 `author` / `user_id`。
+
+**鉴权**：同 [21b](#21b-post-postsv2)，`session_id` / `session_secret` 为 body 必填字段；可选 header `x-publish-id`。
+
+**请求**
+
+```json
+{
+  "postId": 100,
+  "content": "回复内容",
+  "is_anonymous": false,
+  "session_id": 1,
+  "session_secret": "64位hex"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `postId` | 是 | 整数，所属贴文 id |
+| `content` | 是 | 字符串，最长 511，不能为空；会做文本审核 |
+| `is_anonymous` | 否 | 默认 `false` |
+| `session_id` / `session_secret` | 是 | 同 21b |
+
+**响应** `201`（公开评论对象，**不含** `user_id`）
+
+```json
+{
+  "is_hidden": false,
+  "id": 55,
+  "post_id": 100,
+  "to_id": null,
+  "reply_times": 0,
+  "author": "当前显示名或null",
+  "is_anonymous": false,
+  "content": "回复内容",
+  "created_at": "2026-09-29T10:05:00.000Z"
+}
+```
+
+**错误**
+
+| 状态码 | message / 说明 |
+|---|---|
+| 400 | `帖子已隐藏或不存在，无法回复` |
+| 400 | `无效的发布请求标识` / 参数校验失败（`message` 为数组） |
+| 401 | `MISSING_SESSION` / `SESSION_INVALID` |
+| 403 | `ACCOUNT_BANNED` / `CONTENT_REJECTED`（见 [统一错误格式](#统一错误格式)） |
+| 500 | `发布失败，请检查数据` |
+| 503 | `内容审核服务暂不可用，请稍后重试` |
+
+成功后：所属贴文 `reply_times` +1、`update_at` 刷新；若贴文作者不是回复者，会给作者写一条 `reply` 类系统消息（[系统消息 API](#系统消息-api)）。
 
 ---
 
@@ -1517,6 +1701,47 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 
 不返回贴文/图片/附件上的 `user_id`。
 
+> `comments` 已剔除隐藏回复，并额外返回 `hidden_comment_ids`（隐藏回复 id 列表）。贴文本身被隐藏时返回 `{ "id": 100, "hidden": true }`，详见 [26b](#26b-get-postsv2id) 与 [隐藏内容字段](#隐藏内容字段)。
+
+---
+
+### 26b. GET /posts/v2/:id
+
+获取单帖详情（App 端路由）。实现与 [26](#26-get-postsid) 完全一致，仅路径不同；新增客户端统一走本接口，便于服务端后续分流。
+
+**响应（可见）**
+
+```json
+{
+  "is_hidden": false,
+  "id": 100,
+  "title": "标题",
+  "content": "正文",
+  "author": "当前显示名或null",
+  "is_anonymous": false,
+  "category": "默认",
+  "reply_times": 2,
+  "created_at": "...",
+  "update_at": "...",
+  "images": [],
+  "attachments": [],
+  "comments": [55, 56],
+  "hidden_comment_ids": [57]
+}
+```
+
+**响应（贴文被隐藏）**
+
+```json
+{ "id": 100, "hidden": true }
+```
+
+| 字段 | 说明 |
+|---|---|
+| `hidden` | 仅贴文不可见时出现，固定 `true`；此时不返回正文、作者等字段 |
+| `hidden_comment_ids` | 该贴下已隐藏的回复 id；`comments` 中不含这些 id |
+| `is_hidden` | 实体字段，可见时固定 `false`；**不要**用它判断下架 |
+
 ---
 
 ### 27. GET /posts/comment/:id
@@ -1538,15 +1763,100 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 }
 ```
 
+回复本身或其所属贴文被隐藏时，返回：
+
+```json
+{ "id": 55, "post_id": 100, "hidden": true }
+```
+
+---
+
+### 27b. POST /posts/visibility
+
+批量核对内容是否已不可见（举报下架 / 审核隐藏）。**无需 session**，供客户端刷新本地缓存时使用。单次最多 **200** 个 id。
+
+**请求**
+
+```json
+{
+  "post_ids": [100, 101],
+  "comment_ids": [55, 56]
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `post_ids` | 是 | 整数数组，最多 200 项；可为空数组 |
+| `comment_ids` | 是 | 整数数组，最多 200 项；可为空数组 |
+
+> 两个字段都参与校验（未传会 400 `post_ids must be an array` 等），客户端应始终传数组。
+
+**响应**
+
+```json
+{
+  "hidden_posts": [101],
+  "hidden_comments": [56]
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `hidden_posts` | 已隐藏的贴文 id |
+| `hidden_comments` | 自身被隐藏、**或所属贴文被隐藏**的回复 id |
+
+服务端只做两条查询：`posts.is_hidden = 1`、`comments.is_hidden = 1 OR 父帖 is_hidden = 1`。因此：
+
+- 未列出的 id 表示「当前仍可见」；
+- **已删除/不存在的 id 不会出现在结果里**（服务端不校验存在性），客户端若要区分「删除」需另行拉详情；
+- 不返回原因、时间或举报数量。
+
+---
+
+### 隐藏内容字段
+
+举报/审核下架后，读接口用以下两种形态表达不可见，客户端必须兼容：
+
+| 接口 | 隐藏时的响应 | 说明 |
+|---|---|---|
+| `GET /posts/:id`、`GET /posts/v2/:id` | `{ "id": 100, "hidden": true }` | 无正文/作者；`comments` 等字段也不返回 |
+| `GET /posts/comment/:id` | `{ "id": 55, "post_id": 100, "hidden": true }` | 回复自身隐藏，或所属贴文隐藏 |
+| `POST /posts/idListUpdate` | `"101": { "id": 101, "hidden": true }` | 其余 id 仍返回值或 `update_at` |
+| `GET /posts/visibility` | `hidden_posts` / `hidden_comments` | 批量核对 |
+
+补充约定：
+
+- 可见贴文/回复会带实体字段 `is_hidden: false`（服务端未剔除），**不要**把它当契约字段；判断下架只用 `hidden`。
+- 被隐藏的回复不会再出现在贴文详情的 `comments` 中，其 id 收在 `hidden_comment_ids`。
+- 已缓存的旧正文应被本地丢弃（客户端会把这些 id 记入本地隐藏集合）。
+
 ---
 
 ## 文件 API
 
 ### 28. POST /file-processor/upload
 
-🔒 **multipart/form-data** 预上传。字段名 `file`；另附 `session_id`、`session_secret`，可选 `type`=`image`|`attachment`。
+🔒 **multipart/form-data** 预上传。字段名 `file`（单文件），可选表单字段 `type`=`image`|`attachment`。
 
-限制：总大小硬上限 **8MB**；`type=image` 建议 ≤8MB，`attachment` ≤3.5MB。图片会做内容审核。允许扩展名包括常见图片与文本/代码等（见服务端白名单）。
+**鉴权（1.2.0 起收紧）**：
+
+- 必须用 header `x-session-id` / `x-session-secret`。**不能**再把 `session_id` / `session_secret` 放进 multipart 表单：`UploadFileDto` 未声明这两个字段，全局 `forbidNonWhitelisted` 会返回 400。
+- 可选 header `x-publish-id`（同一上传重试复用，见 [x-publish-id 约定](#x-publish-id-约定)）；服务端用它做审核去重。
+- 该路由挂了 `SessionGuard` + `PublishGuard`：账号封禁期间上传直接 403。
+
+限制：总大小硬上限 **8MB**（multer 层）；`type=image` ≤8MB，其他按附件计 ≤3.5MB。图片会做内容审核。允许扩展名包括常见图片与文本/代码等（见服务端白名单）。
+
+**错误**
+
+| 状态码 | message |
+|---|---|
+| 400 | `请选择文件` |
+| 400 | `文件 'xxx' 格式不正确` |
+| 400 | `文件过大` |
+| 400 | `图片格式不正确` |
+| 401 | `MISSING_SESSION` / `SESSION_INVALID` |
+| 403 | `ACCOUNT_BANNED` / `CONTENT_REJECTED` |
+| 413 | 超过 8MB 时由 multer 抛出（具体文案待确认） |
 
 **响应**
 
@@ -1615,6 +1925,748 @@ GET /node/file-processor/convert/2webp/photo/1.png
 健康检查 / 占位。
 
 **响应**：`Hello World!`（文本）
+
+---
+
+### 统一错误格式
+
+所有接口的错误响应分三类：
+
+**1）常规 HTTP 错误**（Nest 默认）
+
+```json
+{
+  "statusCode": 401,
+  "message": "MISSING_SESSION",
+  "error": "Unauthorized"
+}
+```
+
+**2）参数校验错误**（全局 `ValidationPipe`：`whitelist` + `transform` + `forbidNonWhitelisted`）
+
+```json
+{
+  "statusCode": 400,
+  "message": ["title must be a string", "property foo should not exist"],
+  "error": "Bad Request"
+}
+```
+
+多字段失败时 `message` 是**数组**；请求体中出现 DTO 未声明的字段（如把 `session_id` 放进私信/上传的 body）也会 400。
+
+**3）内容安全 / 封禁错误**（`ContentSafetyService`，403，body **没有** `statusCode`）
+
+```json
+{
+  "code": "CONTENT_REJECTED",
+  "message": "内容安全策略命中：porn,abuse",
+  "banned_until": null,
+  "permanent": false
+}
+```
+
+```json
+{
+  "code": "ACCOUNT_BANNED",
+  "message": "账号已封禁，禁止一切发布行为，解禁时间：2026-10-01T12:00:00.000Z",
+  "banned_until": "2026-10-01T12:00:00.000Z",
+  "permanent": false
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `code` | `CONTENT_REJECTED`（本次内容未过审）或 `ACCOUNT_BANNED`（账号封禁中） |
+| `message` | 拒绝原因 / 封禁提示（永久封禁时为「账号已永久封禁，禁止一切发布行为」） |
+| `banned_until` | 解禁时间（ISO8601）；永久封禁或未封禁为 `null` |
+| `permanent` | 是否永久封禁 |
+
+**新增接口涉及的错误码**
+
+| 状态码 | 错误标识 / message | 出现位置 |
+|---|---|---|
+| 400 | `MISSING_SESSION` 之外的校验错误（数组） | 全部带 DTO 的接口 |
+| 401 | `MISSING_SESSION` | 未携带 session 的受保护接口 |
+| 401 | `SESSION_INVALID` | session 不存在 / secret 不匹配 |
+| 403 | `ACCOUNT_BANNED` | 发帖、回复、上传、头像、改名、私信发送 |
+| 403 | `CONTENT_REJECTED` | 同上（内容未过审） |
+| 400 | `无效的发布请求标识` | `x-publish-id` 格式非法 |
+| 404 | `会话不存在` / `用户不存在` / `消息不存在` / `帖子不存在` / `回复不存在` | 私信、系统消息、举报 |
+| 429 | `发送太快，请稍后重试` / `头像上传过于频繁，请稍后重试` | 私信发送、头像上传 |
+| 503 | `内容审核服务暂不可用，请稍后重试` 等 | 审核依赖不可用 / 超时 |
+
+**违规累计与封禁（服务端策略，供客户端解释 403）**
+
+- 每次审核拒绝 `consecutive_failures` +1；未处于处罚期的用户累计 **3 次**触发首次封禁 **1 天**，之后按 **7 天 → 30 天 → 永久** 升级。
+- 已进入处罚等级（曾封禁过）的用户，**下一次**拒绝即升级，不再重新累计 3 次。
+- 审核通过只清零连续失败计数，**不降**处罚等级；同一 `x-publish-id` / `client_message_id` 的重试只记一次。
+- 封禁只限制「发布/上传/发私信」等写入，不影响阅读与收取。
+
+---
+
+### x-publish-id 约定
+
+部分写接口挂了 `PublishGuard`，支持可选 header `x-publish-id`：
+
+| 接口 | 是否校验 |
+|---|---|
+| `POST /posts/v2` | 是 |
+| `POST /posts/v2/comment` | 是 |
+| `POST /user/avatar` | 是 |
+| `POST /user/rename` | 是 |
+| `POST /file-processor/upload` | 是 |
+
+其余接口（登录、私信发送、举报等）不挂 `PublishGuard`，传了也不会被校验。
+
+规则（`src/moderation/publish.guard.ts`）：
+
+- 缺省时服务端生成随机 UUID；一旦传入，必须匹配 `^[0-9a-f-]{36}$`（大小写不敏感，UUID 形状即可），否则 `400 无效的发布请求标识`。
+- 值会小写化后作为本次请求的 `request_key`，用于**审核结论去重**：同一用户 + 同一场景 + 同一 key 的重复请求直接复用上次结论（含 `CONTENT_REJECTED`），不会重复调用审核、也不会重复累计违规。
+- 因此**同一次发布的重试必须复用同一个 key**；改动正文/图片后应换新 key（否则会拿到旧结论）。
+- 它**不是发帖幂等键**：审核通过后重复提交仍会创建多条贴文/回复。私信的消息级幂等请用 `client_message_id`（[35](#35-post-messagesdmconversationsidmessages)）。
+- 该 guard 同时会在进入业务前检查封禁状态，封禁中直接 403 `ACCOUNT_BANNED`。
+
+---
+
+## 私信 API
+
+私信控制器前缀 `messages/dm`，全部接口挂 `SessionGuard`。
+
+**鉴权**：必须用 header `x-session-id` / `x-session-secret`。这些 DTO 都**没有**声明 `session_id` / `session_secret`，全局 `forbidNonWhitelisted` 会把 body 里的 session 字段判为非法（400）。session 失效返回 401，客户端应清空该账号本地消息缓存并要求重新登录。
+
+**分页**：会话列表每页最多 **30**，消息历史每页最多 **50**；`before_*` 与 `after_*` 不能同时传（400 `不能同时指定向前和向后游标`）。
+
+**公共对象**
+
+会话摘要（列表项，`GET /messages/dm/conversations`）：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 会话 id |
+| `peer_user_id` | 对方 `user_id` |
+| `last_seq` | 会话最大消息序号（无消息为 0） |
+| `updated_at` | 会话更新时间 |
+| `peer` / `self` | 双方公开资料：`user_id`、`user_display_id`、`avatar_filename`、`avatar_url`（无头像为 `null`） |
+| `pinned` / `muted` / `blocked` | 我这一侧的置顶 / 免打扰 / 拉黑 |
+| `last_read_seq` | 我的已读游标 |
+| `send_disabled` | 我的账号是否处于发布封禁（`ContentSafetyService.active`） |
+| `banned_until` / `permanent` | 解禁时间 / 是否永久封禁 |
+| `can_send` | 我能否发送：未被任一方拉黑且账号未封禁 |
+| `unread_count` | 该会话未读数（只统计对方消息） |
+| `last_message` | 最近一条消息 `{content(截断 120 字), created_at}`；无消息为 `null` |
+| `sync_hash` | 状态核对用 SHA-256（64 位 hex） |
+
+会话详情（历史 / 偏好设置返回）：`peer`、`self`、`pinned`、`last_read_seq`、`muted`、`blocked`、`send_disabled`、`banned_until`、`permanent`、`can_send`（不含会话 id 与未读数）。
+
+消息对象（`dm_messages` 行）：`id`、`conversation_id`、`seq`、`sender_id`、`client_message_id`、`content`、`created_at`。
+
+---
+
+### 33. GET /messages/dm/conversations
+
+会话列表。默认按「置顶优先、id 倒序」；传 `after_id` 时改为 `id` 升序做增量补齐。
+
+**Query**
+
+| 参数 | 说明 |
+|---|---|
+| `before_id` | 可选，向前翻页：取该 id 之前（更旧）的会话 |
+| `before_pinned` | 可选，`'0'` \| `'1'`，与 `before_id` 配合定位置顶分组边界 |
+| `after_id` | 可选，增量：取 id 大于该值的会话（升序） |
+| `after_time` | DTO 接受 ISO8601，但当前实现未使用（**待确认**是否为遗漏）；增量请用 `after_id` |
+
+**响应**
+
+```json
+{
+  "user_id": 7,
+  "items": [
+    {
+      "id": 12,
+      "peer_user_id": 9,
+      "last_seq": 42,
+      "updated_at": "2026-09-29T10:00:00.000Z",
+      "peer": {
+        "user_id": 9,
+        "user_display_id": "对方",
+        "avatar_filename": "0f0e...c1.jpg",
+        "avatar_url": "https://www.leisure.xin:33433/user-icon/0f0e...c1.jpg"
+      },
+      "self": { "user_id": 7, "user_display_id": "我", "avatar_filename": null, "avatar_url": null },
+      "pinned": false,
+      "last_read_seq": 40,
+      "muted": false,
+      "blocked": false,
+      "send_disabled": false,
+      "banned_until": null,
+      "permanent": false,
+      "can_send": true,
+      "unread_count": 2,
+      "last_message": { "content": "最近一条消息（最多 120 字）", "created_at": "2026-09-29T09:59:00.000Z" },
+      "sync_hash": "64位hex"
+    }
+  ],
+  "has_more": false,
+  "next_after_id": 12,
+  "next_before_id": null,
+  "next_before_pinned": null
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `has_more` | 仅 `after_id` 增量时有意义：`true` 表示还有下一页，继续带 `after_id=next_after_id` |
+| `next_after_id` | 本页最后一条 id（无结果时回显请求值） |
+| `next_before_id` | 向前翻页时本页最后一条 id；没有更多为 `null` |
+| `next_before_pinned` | 与 `next_before_id` 配套的分组值（`0`/`1`），没有更多为 `null` |
+
+**错误**：400 `不能同时指定向前和向后游标`；401 `MISSING_SESSION` / `SESSION_INVALID`。
+
+---
+
+### 34. GET /messages/dm/conversations/:id/messages
+
+会话消息历史。默认倒序（最新在前）；传 `after_seq` 时升序增量。
+
+**Query**
+
+| 参数 | 说明 |
+|---|---|
+| `before_seq` | 可选，加载更旧消息（`seq` 小于该值） |
+| `after_seq` | 可选，增量补齐（`seq` 大于该值） |
+| `after_time` | 可选，ISO8601；仅用于无结果时回填 `cutoff_time`，增量以 `after_seq` 为准 |
+
+**响应**
+
+```json
+{
+  "user_id": 7,
+  "peer": { "user_id": 9, "user_display_id": "对方", "avatar_filename": null, "avatar_url": null },
+  "self": { "user_id": 7, "user_display_id": "我", "avatar_filename": null, "avatar_url": null },
+  "pinned": false,
+  "last_read_seq": 40,
+  "muted": false,
+  "blocked": false,
+  "send_disabled": false,
+  "banned_until": null,
+  "permanent": false,
+  "can_send": true,
+  "items": [
+    {
+      "id": 900,
+      "conversation_id": 12,
+      "seq": 42,
+      "sender_id": 9,
+      "client_message_id": "3f2c...9a",
+      "content": "在吗",
+      "created_at": "2026-09-29T10:00:00.000Z"
+    }
+  ],
+  "has_more": false,
+  "next_after_seq": 42,
+  "cutoff_time": "2026-09-29T10:00:00.000Z",
+  "next_before_seq": null
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `has_more` | 仅 `after_seq` 增量时有意义 |
+| `next_after_seq` | 本页最后一条 `seq`（无结果回显请求值） |
+| `cutoff_time` | 本页最后一条的 `created_at`；无结果时为 `after_time` |
+| `next_before_seq` | 向前翻页时本页最后一条 `seq`；没有更多为 `null` |
+
+**错误**：400 `不能同时指定向前和向后游标`、404 `会话不存在`、401 session 相关。
+
+---
+
+### 35. POST /messages/dm/conversations/:id/messages
+
+发送私信。文本先过审核，通过后才写库并投递给对方。
+
+**请求**
+
+```json
+{
+  "client_message_id": "3f2c8d1e-6b7a-4c2f-9d10-1a2b3c4d5e6f",
+  "content": "在吗"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `client_message_id` | 是 | **UUID v4**（`IsUUID('4')`），消息级幂等键；重试必须复用，客户端本地用它匹配「发送中/已确认」 |
+| `content` | 是 | 1–2000 字（服务端 `trim` 后校验；空串 400） |
+
+**响应** `201`（刚写入的消息对象）
+
+```json
+{
+  "id": 901,
+  "conversation_id": 12,
+  "seq": 43,
+  "sender_id": 7,
+  "client_message_id": "3f2c8d1e-6b7a-4c2f-9d10-1a2b3c4d5e6f",
+  "content": "在吗",
+  "created_at": "2026-09-29T10:01:00.000Z"
+}
+```
+
+**幂等规则**
+
+- 同一 `sender_id + client_message_id` 重复提交：内容与会话一致 → 直接返回原消息（不重复投递、不重复计数）。
+- 同一 UUID 用于**其他内容或会话** → 409 `消息标识已用于其他内容，请刷新后重试`。
+- 审核拒绝会按 `client_message_id` 记一次；重试同一 UUID 只返回原拒绝结论。
+- 审核通过并成功发送会清零「连续审核失败」计数；重放历史成功 UUID 不会清零。
+
+**错误**
+
+| 状态码 | message / 说明 |
+|---|---|
+| 400 | `请输入 1–2000 字的消息`、参数校验失败 |
+| 401 | `MISSING_SESSION` / `SESSION_INVALID` |
+| 403 | `当前无法向该用户发送私信`（任一方拉黑） |
+| 403 | `ACCOUNT_BANNED` / `CONTENT_REJECTED`（body 带 `code`，见 [统一错误格式](#统一错误格式)） |
+| 404 | `会话不存在` |
+| 409 | `消息标识已用于其他内容，请刷新后重试` / `会话消息数已达上限` |
+| 429 | `发送太快，请稍后重试`（同一发送者跨会话 1 秒内只能发一条） |
+| 503 | `私信审核超时，请稍后重试` / `审核服务不可用，请稍后重试`（**不**累计违规） |
+
+> 当前后端返回 `CONTENT_REJECTED` / `ACCOUNT_BANNED`；客户端代码里仍兼容判断旧标识 `DM_SEND_DISABLED`，但**服务端已不再返回**（待确认是否有历史兼容路径）。
+
+---
+
+### 36. POST /messages/dm/conversations
+
+创建（或取回）与某用户的私信会话。会话按用户对归一化（`min(user)` / `max(user)`），因此双方重复调用只会得到一个会话。
+
+**请求**
+
+```json
+{ "peer_user_id": 9 }
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `peer_user_id` | 是 | 对方 `user_id`（1–2147483647） |
+
+**响应**（新建与已存在均返回 `201`）
+
+```json
+{
+  "user_id": 7,
+  "conversation": { "id": 12, "peer_user_id": 9, "last_seq": 0 }
+}
+```
+
+**错误**
+
+| 状态码 | message |
+|---|---|
+| 400 | `不能给自己发送私信` |
+| 401 | session 相关 |
+| 403 | `当前无法向该用户发送私信`（任一方拉黑） |
+| 404 | `用户不存在` |
+
+> 客户端 `dm_api.dart` 里还有 `conversations/from-post` 的缓存分支，但后端**没有该路由**（直接调用会 404）。是否为未实现的「从贴文发起私信」**待确认**；当前请只用本接口按 `peer_user_id` 建会话。
+
+---
+
+### 37. POST /messages/dm/conversations/:id/read
+
+推进会话已读游标。服务端取 `max(旧值, min(last_read_seq, conversation.last_seq))`，**只前进不后退**。
+
+**请求**
+
+```json
+{ "last_read_seq": 42 }
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `last_read_seq` | 是 | 已读到的消息 `seq`（0–4294967295；0 表示清空） |
+
+**响应**：`{ "success": true }`
+
+**错误**：400 参数校验、404 `会话不存在`、401 session 相关。
+
+---
+
+### 38. GET /messages/dm/conversations/:id/unread
+
+单会话未读数。
+
+**响应**
+
+```json
+{ "unread_count": 2, "muted": false, "blocked": false }
+```
+
+`unread_count` 只统计 `sender_id != 我` 且 `seq > last_read_seq` 的消息。
+
+**错误**：404 `会话不存在`、401 session 相关。
+
+---
+
+### 39. GET /messages/dm/unread
+
+全局未读汇总（**含系统消息未读**）。
+
+**响应**
+
+```json
+{ "user_id": 7, "unread_count": 5, "total_unread_count": 9 }
+```
+
+| 字段 | 说明 |
+|---|---|
+| `unread_count` | 私信未读（**不含**已免打扰会话）+ 系统消息未读 |
+| `total_unread_count` | 私信未读（**含**免打扰会话）+ 系统消息未读 |
+
+`systemCount` 来自 [44. GET /messages/system/summary](#44-get-messagessystemsummary) 的 `unread_count`。
+
+---
+
+### 40. POST /messages/dm/read-all
+
+一键已读：把所有会话的 `last_read_seq` 推到各自 `last_seq`，同时把全部**可见**系统消息标记已读（同一事务）。
+
+**响应**：`{ "success": true }`
+
+> 事务提交后新产生的消息仍为未读；通知走实时事件，不保证送达。
+
+---
+
+### 41. GET /messages/dm/pinned
+
+只返回我置顶的会话 id（避免重传正文），用于多设备发现「旧会话被置顶」。
+
+**响应**
+
+```json
+{ "ids": [12, 18] }
+```
+
+---
+
+### 42. POST /messages/dm/conversations/:id/preferences
+
+设置置顶 / 免打扰 / 拉黑。三项至少传一项，否则 400 `请选择设置项`。
+
+**请求**（可只传其中一项）
+
+```json
+{ "pinned": true, "muted": false, "blocked": false }
+```
+
+**响应**：会话详情对象（字段同 [34](#34-get-messagesdmconversationsidmessages) 的 `peer`…`can_send`）
+
+```json
+{
+  "peer": { "user_id": 9, "user_display_id": "对方", "avatar_filename": null, "avatar_url": null },
+  "self": { "user_id": 7, "user_display_id": "我", "avatar_filename": null, "avatar_url": null },
+  "pinned": true,
+  "last_read_seq": 42,
+  "muted": false,
+  "blocked": false,
+  "send_disabled": false,
+  "banned_until": null,
+  "permanent": false,
+  "can_send": true
+}
+```
+
+**错误**：400 `请选择设置项`、404 `会话不存在`、401 session 相关。
+
+---
+
+### 43. POST /messages/dm/conversations/state
+
+增量状态核对：客户端提交本地缓存的 `(id, sync_hash)`，服务端只返回**有变化**的会话；内容不可再访问的 id 放入 `removed_ids`。
+
+**请求**
+
+```json
+{
+  "known": [
+    { "id": 12, "hash": "64位hex" },
+    { "id": 18, "hash": "64位hex" }
+  ]
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `known` | 最多 200 项；空数组直接返回空结果 |
+| `known[].hash` | 上次响应的 `sync_hash`；首次可传 64 个 `0` 强制取回 |
+
+**响应**
+
+```json
+{ "items": [], "removed_ids": [18] }
+```
+
+- `items`：变动后的完整会话摘要（含新 `sync_hash`）。
+- `removed_ids`：不再属于我 / 已不存在的会话 id，客户端应删本地缓存。
+- `sync_hash` 计算：`SHA-256(JSON.stringify(会话对象))`，计算时对象**不含** `sync_hash` 本身。
+
+**错误**：400 参数校验（最多 200 项）、401 session 相关。
+
+---
+
+### 私信实时通知
+
+长连接见 [附录 E](#附录-e-realtime--socketio)。服务端只推送「有变化」的信号，**不携带正文**；收到后仍需走 HTTP 拉取（HTTP 会重新校验成员资格）。
+
+| 事件 | payload | 触发 |
+|---|---|---|
+| `dm.changed` | `{ "conversation_id": 12, "notify": true }` | 新私信、已读游标变化、置顶/免打扰/拉黑变化 |
+| `system.changed` | `{}` | 新增系统消息 / 审核与举报通知 |
+
+`notify` 表示该会话是否允许本地通知（对方免打扰/拉黑时为 `false`）。事件鉴权失败会直接断开连接。
+
+---
+
+## 系统消息 API
+
+控制器前缀 `messages/system`，全部接口挂 `SessionGuard`，鉴权同私信（**必须 header**，body 带 session 字段会 400）。
+
+**可见性**：一条系统消息对用户可见的条件是
+
+- `recipient_id = 我`，或
+- `recipient_id IS NULL` 且 `category = announcement`（全体公告）。
+
+**分类**
+
+| `category` | 含义 | 典型来源 |
+|---|---|---|
+| `announcement` | 公告 | 管理员公告（`recipient_id` 为 `null`） |
+| `moderation` | 审核与举报 | 内容未过审、账号封禁、举报处理结果、自动隐藏 |
+| `reply` | 回复通知 | 我的贴文收到新回复 / 二次回复 |
+
+**系统消息对象**
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 消息 id |
+| `recipient_id` | 接收者；全体公告为 `null` |
+| `category` | 三个分类之一 |
+| `event_key` | 服务端去重键（如 `reply:55:7`、`report-result:9`） |
+| `title` / `content` | 标题 / 正文（关联内容被隐藏后，正文会被替换为「原文不再展示」类文案） |
+| `post_id` / `comment_id` | 关联贴文 / 回复，可为 `null` |
+| `created_at` | 创建时间 |
+| `is_read` | 当前用户是否已读 |
+| `sync_hash` | 状态核对用 SHA-256 |
+
+---
+
+### 44. GET /messages/system/summary
+
+分类未读摘要。
+
+**响应**
+
+```json
+{
+  "counts": { "announcement": 0, "moderation": 1, "reply": 2 },
+  "unread_count": 3
+}
+```
+
+`counts` 始终包含三个 key（无未读为 0）；`unread_count` 为三者之和。
+
+---
+
+### 45. GET /messages/system
+
+分类列表。默认 `id` 倒序，每页最多 **30**；传 `after_id` 时升序增量。
+
+**Query**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `category` | 是 | `announcement` \| `moderation` \| `reply`；缺失或非法 400 |
+| `before_id` | 否 | 加载更旧消息 |
+| `after_id` | 否 | 增量补齐 |
+| `after_time` | 否 | ISO8601；仅用于无结果时回填 `cutoff_time` |
+
+**响应**
+
+```json
+{
+  "items": [
+    {
+      "id": 10,
+      "recipient_id": 7,
+      "category": "reply",
+      "event_key": "reply:55:7",
+      "title": "你的帖子收到新回复",
+      "content": "《标题》收到新回复：\n内容",
+      "post_id": 100,
+      "comment_id": 55,
+      "created_at": "2026-09-29T10:05:00.000Z",
+      "is_read": false,
+      "sync_hash": "64位hex"
+    }
+  ],
+  "has_more": false,
+  "next_after_id": 10,
+  "cutoff_time": "2026-09-29T10:05:00.000Z",
+  "next_before_id": null
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `has_more` | 仅 `after_id` 增量时有意义 |
+| `next_after_id` | 本页最后一条 id（无结果回显请求值） |
+| `cutoff_time` | 本页最后一条 `created_at`；无结果时为 `after_time` |
+| `next_before_id` | 向前翻页时本页最后一条 id；没有更多为 `null` |
+
+**错误**：400 `不能同时指定向前和向后游标` / 参数校验、401 session 相关。
+
+---
+
+### 46. POST /messages/system/state
+
+按分类做增量状态核对（语义同 [43](#43-post-messagesdmconversationsstate)）。
+
+**请求**
+
+```json
+{
+  "category": "reply",
+  "known": [{ "id": 10, "hash": "64位hex" }]
+}
+```
+
+| 字段 | 说明 |
+|---|---|
+| `category` | 必填，三个分类之一 |
+| `known` | 最多 200 项；`hash` 为上次响应的 `sync_hash` |
+
+**响应**
+
+```json
+{ "items": [], "removed_ids": [10] }
+```
+
+`removed_ids` 表示不可再访问（被删除/不再可见）的消息 id。
+
+---
+
+### 47. POST /messages/system/:id/read
+
+标记单条系统消息已读（幂等，重复调用不报错）。
+
+**响应**：`{ "success": true }`
+
+**错误**：404 `消息不存在`（不存在或对我不可见）、401 session 相关。
+
+---
+
+## 举报 API
+
+### 48. POST /posts/reports
+
+举报贴文或回复。**须登录**；`SessionGuard` 只从 header 读 session（`ReportDto` 未声明 session 字段，body 带会被 400）。
+
+**请求**
+
+```json
+{
+  "target_type": "post",
+  "target_id": 100,
+  "reason": "垃圾广告"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `target_type` | 是 | `post` \| `comment` |
+| `target_id` | 是 | 目标 id；`comment` 时须为回复 id |
+| `reason` | 是 | 1–500 字，服务端 `trim` 后校验 |
+
+**响应**
+
+```json
+{ "duplicate": false, "hidden": true, "post_id": 100 }
+```
+
+| 字段 | 说明 |
+|---|---|
+| `duplicate` | 我此前是否已举报过同一目标（同一用户对同一目标只留一条记录） |
+| `hidden` | 举报后目标是否已不可见（达到阈值自动隐藏，或本来就已隐藏） |
+| `post_id` | 目标所属贴文 id（`target_type=post` 时即 `target_id`） |
+
+**处理规则**
+
+1. 目标不存在 → 404（`回复不存在` / `帖子不存在` / `内容不存在`）。
+2. 目标本身或所属贴文**已隐藏** → 不新增记录，直接返回 `hidden: true`（`duplicate` 视此前是否举报过）。
+3. 同一用户重复举报 → 不重复计数，返回 `duplicate: true`。
+4. 同一目标累计 **3 名不同用户**举报 → 自动隐藏：
+   - 贴文：`posts.is_hidden = 1`；回复：`comments.is_hidden = 1`，并刷新所属贴文 `update_at`；
+   - 给每位举报人写 `moderation` 系统消息（标题「举报处理结果」）；
+   - 给内容作者写 `moderation` 系统消息（标题「内容已自动隐藏」）；
+   - 该内容此前产生的 `reply` 通知正文被替换为「关联内容已隐藏，原文不再展示。」
+5. 自动隐藏**不代表人工审核结论**；当前没有申诉/撤销接口，也没有公开的管理员裁决接口。
+
+**错误**
+
+| 状态码 | message |
+|---|---|
+| 400 | `请填写 1–500 字举报原因`、参数校验失败 |
+| 401 | `MISSING_SESSION` / `SESSION_INVALID` |
+| 404 | `回复不存在` / `帖子不存在` / `内容不存在` |
+
+---
+
+## 头像 API
+
+### 49. POST /user/avatar
+
+上传并**同步**审核头像。审核通过才写库并返回正式地址；旧头像文件在成功后删除。
+
+**请求**：`multipart/form-data`
+
+| 部分 | 说明 |
+|---|---|
+| `file` | 必填，单个文件，字段名固定 `file`；**仅接受 512×512 JPEG**（客户端先裁剪） |
+| header `x-session-id` / `x-session-secret` | 必填（`SessionGuard`） |
+| header `x-publish-id` | 可选，审核去重键（见 [x-publish-id 约定](#x-publish-id-约定)） |
+
+限制（`avatarUploadOptions`）：
+
+- 文件大小 ≤ **5MB**；
+- 只接受 1 个文件；**不接受额外表单字段**（`fields: 0`，多传字段会触发 multer 限制而失败，具体状态码待确认）；
+- 必须是 JPEG（首字节 `FF D8 FF`）且宽高都等于 512，否则 400；
+- 服务端会完整解码校验，损坏/截断图片同样 400；
+- 每用户 **10 秒**内只能上传一次（Redis `avatar:upload:<user_id>`）。
+
+**响应** `200`
+
+```json
+{ "avatar_url": "https://www.leisure.xin:33433/user-icon/0f0e...c1.jpg" }
+```
+
+`avatar_url` 同时出现在 [7. POST /user/profile](#7-post-userprofile) 与私信的 `peer` / `self` 中；未上传或审核未通过为 `null`。
+
+**错误**
+
+| 状态码 | message / 说明 |
+|---|---|
+| 400 | `请选择头像图片` |
+| 400 | `头像不能超过 5MB` |
+| 400 | `头像必须为裁剪后的 512×512 JPEG 图片` |
+| 400 | `头像尺寸必须为 512×512，请在客户端重新裁剪` |
+| 400 | `头像文件无效，请在客户端重新裁剪` |
+| 400 | `无效的发布请求标识`（`x-publish-id` 格式非法） |
+| 401 | `MISSING_SESSION` / `SESSION_INVALID` / `USER_NOT_FOUND` |
+| 403 | `ACCOUNT_BANNED` / `CONTENT_REJECTED`（审核未通过；`code` 见统一错误格式） |
+| 429 | `头像上传过于频繁，请稍后重试` |
+| 503 | `头像审核超时，请稍后重试`（服务端 45 秒）/ `头像校验服务暂时不可用` / `内容审核服务暂不可用，请稍后重试` |
+
+> 客户端 HTTP 超时按 **90 秒**设置（审核在请求内完成）。超过 5MB 时 multer 可能先返回 413，具体响应文案**待确认**。
 
 ---
 
@@ -2015,6 +3067,36 @@ io('https://<host>', {
 
 推送后断开该设备上属于**旧** `user_id` 的连接。客户端清掉旧 session；若刚拿到新 session，用新凭证重新 connect。
 
+#### `dm.changed`
+
+私信有变化时推给会话双方（`1.2.0` 新增）。payload **不含正文**，仅提示客户端重新拉取：
+
+```json
+{
+  "conversation_id": 12,
+  "notify": true
+}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `conversation_id` | 发生变化的会话 id |
+| `notify` | 是否允许本地通知；`false` 表示对方免打扰/拉黑等，只需静默刷新 |
+
+触发：新私信、已读游标、置顶/免打扰/拉黑变化。每条推送前会重新校验 session，失败则断开连接。
+
+#### `system.changed`
+
+系统消息（公告/审核与举报/回复通知）有新增或变更时推送（`1.2.0` 新增）：
+
+```json
+{}
+```
+
+payload 为空；收到后重新请求 [44](#44-get-messagessystemsummary) / [45](#45-get-messagessystem) 即可。
+
+> 这两个事件都只是「有变化」的信号：HTTP 会在返回前重新校验成员资格与可见性，客户端不要依赖 payload 更新正文。
+
 ### 客户端处理
 
 1. 收到 `binding.unbound` → 清该账户本地 session，退回登录 / 账户列表。
@@ -2328,6 +3410,9 @@ LLM 二次审核 → 若未通过拦截
 | `LLM_MODERATION_TEXT_MODEL` | 文本审核模型，默认 `Qwen/Qwen2.5-7B-Instruct` |
 | `LLM_MODERATION_IMAGE_MODEL` | 图片审核模型，默认 `Qwen/Qwen3-VL-8B-Instruct` |
 | `LLM_MODERATION_TIMEOUT_MS` | LLM 审核超时（毫秒），默认 `15000` |
+| `IMG_BASE_URL` | 图片/头像对外基址，默认 `https://www.leisure.xin:33433`；`avatar_url` = 该值 + `/user-icon/<uuid>.jpg` |
+| `AVATAR_STORAGE_DIR` | 头像正式目录，默认 `/var/www/img/user-icon` |
+| `AVATAR_REVIEW_DIR` | 头像送审临时目录，默认 `/var/www/img/pre-upload/avatar-review` |
 | `LOG_DIR` | 日志文件目录，默认 `/var/www/logs` |
 | `LOG_FILE` | 日志文件名，默认 `treehole-nest.log` |
 
