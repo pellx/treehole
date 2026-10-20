@@ -5,7 +5,7 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
 除文件上传外，请求/响应均为 `Content-Type: application/json`。  
 受保护接口（标注 🔒）需在 body 或 header 携带 session：`session_id` / `session_secret`（或 `x-session-id` / `x-session-secret`）。
 
-> 1.2.0 新增的私信、系统消息、举报、头像接口的 DTO **没有** `session_id` / `session_secret` 字段，必须用 header；放进 body 会被 `forbidNonWhitelisted` 判为 400。发帖 v2 相反，body 也必须带这两个字段。详见各章「鉴权」。
+> 1.2.0 新增的私信、系统消息、举报、头像接口的 DTO **没有** `session_id` / `session_secret` 字段，必须用 header；放进 body 会被 `forbidNonWhitelisted` 判为 400。v2 发布接口（`/posts/v2`、`/posts/v2/comment`）相反，body 也必须带这两个字段。详见各章「鉴权」。
 
 ---
 
@@ -25,7 +25,7 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
 - **发帖 / 回复 v2**（[21b](#21b-post-postsv2)、[22b](#22b-post-postsv2comment)）
   - `user_id` 由 session 解析，署名实时取 `user_display_id`；v1 `POST /posts`、`POST /posts/comment` 已停用（**410 Gone**）
   - 新增 `GET /posts/v2/:id`，返回 `hidden` / `hidden_comment_ids`
-- **统一错误码与发布幂等**
+- **统一错误码与发布重试**
   - `MISSING_SESSION` / `SESSION_INVALID` / `ACCOUNT_BANNED` / `CONTENT_REJECTED`
   - `x-publish-id` 作为发布/上传的**审核结论去重键**（不是发帖幂等键，见 [x-publish-id 约定](#x-publish-id-约定)）
 
@@ -1426,7 +1426,7 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 |---|---|---|
 | `title` | 是 | 字符串，最长 255；不能为空 |
 | `content` | 否 | 字符串；服务端 `trim()` 后落库，缺省空串 |
-| `category` | 否 | `问答` \| `资料` \| `兴趣` \| `梗图` \| `默认`；缺省存「默认」并异步 AI 分类 |
+| `category` | 否 | `问答` \| `资料` \| `兴趣` \| `梗图` \| `默认`；缺省存「默认」并异步 AI 分类（仅**完全未传**时触发，显式传「默认」不触发） |
 | `is_anonymous` | 否 | 默认 `false`；`true` 时对外 `author` 为 `null`，但 `user_id` 仍落库 |
 | `uploaded` | 否 | 最多 13 项，结构同 [21](#21-post-posts)：图片 ≤12 张且合计 ≤8MB，单附件 ≤3.5MB |
 | `session_id` / `session_secret` | 是 | 见上方「鉴权」 |
@@ -1862,7 +1862,8 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 | 400 | `图片格式不正确` |
 | 401 | `MISSING_SESSION` / `SESSION_INVALID` |
 | 403 | `ACCOUNT_BANNED` / `CONTENT_REJECTED` |
-| 待确认 | 超过 8MB 时由 multer 抛 `LIMIT_FILE_SIZE`，后端未做错误映射，实际状态码/文案**待确认**（可能 500） |
+
+> 超过 8MB 时由 multer 抛 `LIMIT_FILE_SIZE`，后端未做错误映射，**实际状态码/文案待确认**（可能 500）。
 
 **响应**
 
@@ -2059,7 +2060,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `send_disabled` | 我的账号是否处于发布封禁（`ContentSafetyService.active`） |
 | `banned_until` / `permanent` | 解禁时间 / 是否永久封禁 |
 | `can_send` | 我能否发送：未被任一方拉黑且账号未封禁 |
-| `unread_count` | 该会话未读数（只统计对方消息；免打扰会话恒为 0） |
+| `unread_count` | 该会话未读数（只统计对方消息；**不**因免打扰归零，免打扰只在全局 `GET /messages/dm/unread` 的 `unread_count` 中排除） |
 | `last_message` | 最近一条消息 `{content(截断 120 字), created_at}`；无消息为 `null` |
 | `sync_hash` | 状态核对用 SHA-256（64 位 hex） |
 
@@ -2226,8 +2227,8 @@ GET /node/file-processor/convert/2webp/photo/1.png
 **幂等规则**
 
 - 同一 `sender_id + client_message_id` 重复提交：内容与会话一致 → 直接返回原消息（不重复投递、不重复计数）。
-- 同一 UUID 用于**其他内容或会话** → 409 `消息标识已用于其他内容，请刷新后重试`。
-- 审核拒绝会按 `client_message_id` 记一次；重试同一 UUID 只返回原拒绝结论。
+- 已成功发送的 UUID 用于**其他内容或会话** → 409 `消息标识已用于其他内容，请刷新后重试`（比较的是 `trim` 后的内容）。
+- 审核拒绝会按 `client_message_id` 记一次；重试同一 UUID **不比对内容**，直接返回原拒绝结论（`CONTENT_REJECTED`，若已升级封禁则为 `ACCOUNT_BANNED`）。
 - 审核通过并成功发送会清零「连续审核失败」计数；重放历史成功 UUID 不会清零。
 
 **错误**
@@ -2243,7 +2244,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | 429 | `发送太快，请稍后重试`（同一发送者跨会话 1 秒内只能发一条） |
 | 503 | `私信审核超时，请稍后重试` / `审核服务不可用，请稍后重试`（或上游 moderation 返回的 `reason`）；**不**累计违规 |
 
-> 当前后端返回 `CONTENT_REJECTED` / `ACCOUNT_BANNED`；客户端代码里仍兼容判断旧标识 `DM_SEND_DISABLED`，但**服务端已不再返回**（待确认是否有历史兼容路径）。
+> 当前后端只返回 `CONTENT_REJECTED` / `ACCOUNT_BANNED`；客户端 `dm_chat_page.dart` 仍兼容判断旧标识 `DM_SEND_DISABLED`，但服务端已不再返回。
 
 ---
 
@@ -3084,7 +3085,7 @@ io('https://<host>', {
 
 #### `dm.changed`
 
-私信有变化时推给会话双方（`1.2.0` 新增）。payload **不含正文**，仅提示客户端重新拉取：
+私信有变化时推给相关用户（发送方/接收方，通常为会话双方；`1.2.0` 新增）。payload **不含正文**，仅提示客户端重新拉取：
 
 ```json
 {
