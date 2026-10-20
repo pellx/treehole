@@ -117,6 +117,13 @@ class DmApi {
     return data;
   }
 
+  /// 接受 / 拒绝陌生人的私信请求（仅接收方可调用）。
+  Future<Map<String, dynamic>> accept(int id) =>
+      request('conversations/$id/accept', body: const {});
+
+  Future<Map<String, dynamic>> reject(int id) =>
+      request('conversations/$id/reject', body: const {});
+
   Future<Map<String, dynamic>> systemRequest(
     String path, {
     Map<String, dynamic>? body,

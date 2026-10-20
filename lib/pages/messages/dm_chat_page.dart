@@ -53,6 +53,10 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
   bool _pinned = false;
   bool _blocked = false;
   bool _canSend = true;
+  // 陌生人私信请求状态：pending 时双方都不能发送，需接收方接受。
+  String _status = 'accepted';
+  bool _isRequester = false;
+  bool _responding = false;
   Timer? _banExpiry;
   Map<String, dynamic>? _peerProfile;
   Map<String, dynamic>? _selfProfile;
@@ -61,6 +65,8 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
     _pinned = data['pinned'] == true;
     _blocked = data['blocked'] == true;
     _canSend = data['can_send'] != false;
+    _status = data['status']?.toString() ?? 'accepted';
+    _isRequester = data['is_requester'] == true;
     _banExpiry?.cancel();
     final until = DateTime.tryParse(data['banned_until']?.toString() ?? '');
     if (data['send_disabled'] == true &&
@@ -115,6 +121,29 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
       if (mounted) setState(() => _busy = false);
       _drainRefresh();
     }
+  }
+
+  /// 接受 / 拒绝对方发来的私信请求。
+  Future<void> _respondRequest(bool accept) async {
+    if (_responding || _busy) return;
+    setState(() => _responding = true);
+    try {
+      await widget.api.request(
+        'conversations/${widget.conversationId}/${accept ? 'accept' : 'reject'}',
+        body: const {},
+      );
+      if (!mounted) return;
+      showAppToast(
+        context,
+        message: accept ? '已接受私信请求' : '已拒绝私信请求',
+      );
+    } catch (error) {
+      if (mounted) showAppToast(context, message: error.toString());
+    } finally {
+      if (mounted) setState(() => _responding = false);
+    }
+    await _load(silent: true);
+    unawaited(DmInbox.refresh());
   }
 
   bool _refreshPending = false;
@@ -372,6 +401,50 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  /// 未接受状态下的提示条：接收方可同意/拒绝，发起方只看到等待提示。
+  Widget _requestBanner() {
+    final colors = Theme.of(context).colorScheme;
+    final rejected = _status == 'rejected';
+    final text = _isRequester
+        ? (rejected
+              ? '对方已拒绝你的私信请求，24 小时后可再次申请'
+              : '已发送私信请求，等待对方接受')
+        : (rejected ? '你已拒绝该私信请求' : '对方请求与你私信，接受后才能互发消息');
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(text, style: TextStyle(color: colors.onSurface)),
+          if (_status == 'pending' && !_isRequester) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                OutlinedButton(
+                  onPressed: _responding
+                      ? null
+                      : () => _respondRequest(false),
+                  child: const Text('拒绝'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: _responding ? null : () => _respondRequest(true),
+                  child: const Text('同意'),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -516,33 +589,35 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                       },
                     ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _input,
-                      readOnly: _sending || !_canSend,
-                      minLines: 1,
-                      maxLines: 4,
-                      maxLength: 2000,
-                      decoration: InputDecoration(
-                        hintText: _canSend ? '输入私信' : '当前无法发送私信',
-                        counterText: '',
-                        border: OutlineInputBorder(),
+            if (_status != 'accepted') _requestBanner(),
+            if (_status == 'accepted')
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _input,
+                        readOnly: _sending || !_canSend,
+                        minLines: 1,
+                        maxLines: 4,
+                        maxLength: 2000,
+                        decoration: InputDecoration(
+                          hintText: _canSend ? '输入私信' : '当前无法发送私信',
+                          counterText: '',
+                          border: OutlineInputBorder(),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: _busy || _sending || !_canSend ? null : _send,
-                    child: const Text('发送'),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: _busy || _sending || !_canSend ? null : _send,
+                      child: const Text('发送'),
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),

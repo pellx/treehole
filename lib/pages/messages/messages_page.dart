@@ -323,7 +323,40 @@ class _MessagesPageState extends State<MessagesPage>
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if (mounted && conversation != null) await _open(conversation);
+    if (mounted && conversation != null) {
+      if (conversation['status'] == 'pending' &&
+          conversation['is_requester'] == true) {
+        showAppToast(context, message: '已发送私信请求，等待对方接受');
+      }
+      await _open(conversation);
+    }
+  }
+
+  /// 处理陌生人私信请求：接受后双方可正常发送，拒绝进入 24 小时冷却。
+  Future<void> _respond(Map<String, dynamic> item, bool accept) async {
+    if (_busy || _api == null) return;
+    setState(() => _busy = true);
+    try {
+      final data = await _api!.request(
+        'conversations/${item['id']}/${accept ? 'accept' : 'reject'}',
+        body: const {},
+      );
+      if (!mounted) return;
+      final conversation = data['conversation'];
+      setState(() {
+        if (conversation is Map<String, dynamic>) item.addAll(conversation);
+      });
+      showAppToast(
+        context,
+        message: accept ? '已接受私信请求' : '已拒绝私信请求',
+      );
+      unawaited(DmInbox.refresh());
+    } catch (error) {
+      if (mounted) showAppToast(context, message: error.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (mounted && widget.active) await _load(reset: true, silent: true);
   }
 
   Future<void> _clearUnread() async {
@@ -534,6 +567,18 @@ class _MessagesPageState extends State<MessagesPage>
                               conversation: item,
                               isFirst: conversationIndex == 0,
                               onTap: _api == null ? null : () => _open(item),
+                              onAccept:
+                                  _api == null ||
+                                      item['status'] != 'pending' ||
+                                      item['is_requester'] == true
+                                  ? null
+                                  : () => _respond(item, true),
+                              onReject:
+                                  _api == null ||
+                                      item['status'] != 'pending' ||
+                                      item['is_requester'] == true
+                                  ? null
+                                  : () => _respond(item, false),
                             ),
                           ),
                         );

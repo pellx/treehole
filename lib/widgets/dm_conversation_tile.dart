@@ -5,15 +5,20 @@ import '../theme/app_messages_theme.dart';
 import 'user_avatar.dart';
 
 /// 会话行：头像、昵称、最近消息，右侧时间和未读标记。
+/// 未接受的私信请求显示「请求」标记与同意/拒绝按钮。
 class DmConversationTile extends StatelessWidget {
   final Map<String, dynamic> conversation;
   final VoidCallback? onTap;
+  final VoidCallback? onAccept;
+  final VoidCallback? onReject;
   final bool isFirst;
 
   const DmConversationTile({
     super.key,
     required this.conversation,
     this.onTap,
+    this.onAccept,
+    this.onReject,
     this.isFirst = false,
   });
 
@@ -33,6 +38,26 @@ class DmConversationTile extends StatelessWidget {
         : '${local.year}/${local.month}/${local.day}';
   }
 
+  Widget _requestButton(
+    BuildContext context,
+    String label,
+    VoidCallback? onPressed,
+    bool primary,
+  ) {
+    return TextButton(
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        minimumSize: const Size(0, 28),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: primary
+            ? Theme.of(context).colorScheme.primary
+            : AppMessagesTheme.secondaryLight,
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 12)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -50,7 +75,16 @@ class DmConversationTile extends StatelessWidget {
     final content = (lastMessage?['content'] as String?)
         ?.replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    final preview = content ?? '';
+    final status = conversation['status'] as String? ?? 'accepted';
+    final pending = status == 'pending';
+    final rejected = status == 'rejected';
+    final requester = conversation['is_requester'] == true;
+    final stateText = pending
+        ? (requester ? '已发送私信请求，等待对方接受' : '请求与你私信')
+        : rejected
+        ? (requester ? '对方已拒绝你的私信请求' : '你已拒绝该私信请求')
+        : null;
+    final preview = stateText ?? content ?? '';
     final time = lastMessage == null
         ? '无历史消息'
         : _time(lastMessage['created_at'] as String?);
@@ -119,6 +153,28 @@ class DmConversationTile extends StatelessWidget {
                                   ),
                                 ),
                               ),
+                              if (pending) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: theme.colorScheme.primary.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    '请求',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: theme.colorScheme.primary,
+                                    ),
+                                  ),
+                                ),
+                              ],
                               if (time.isNotEmpty) ...[
                                 const SizedBox(width: 12),
                                 ConstrainedBox(
@@ -167,6 +223,11 @@ class DmConversationTile extends StatelessWidget {
                                   ),
                                 ),
                               ),
+                              if (pending && !requester && onAccept != null) ...[
+                                const SizedBox(width: 6),
+                                _requestButton(context, '拒绝', onReject, false),
+                                _requestButton(context, '同意', onAccept, true),
+                              ],
                               if (muted) ...[
                                 const SizedBox(width: 8),
                                 Icon(
