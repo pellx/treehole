@@ -2126,6 +2126,8 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `next_before_id` | 本页最后一条 id，可作为下一次 `before_id`；不足一页（没有更旧数据）为 `null` |
 | `next_before_pinned` | 与 `next_before_id` 配套的分组值（`0`/`1`），没有更多为 `null` |
 
+> 不带游标时按 `pinned DESC, id DESC` 倒序返回（最新在前），`next_after_id` 是**最旧**一条，不能直接当增量游标；增量请传 `after_id`（此时改为升序，`has_more` 才有意义）。
+
 **错误**：400 `不能同时指定向前和向后游标`；401 `MISSING_SESSION` / `SESSION_INVALID`。
 
 ---
@@ -2182,6 +2184,8 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `cutoff_time` | 本页最后一条的 `created_at`；无结果时为 `after_time` |
 | `next_before_seq` | 本页最后一条 `seq`，可作为下一次 `before_seq`；不足一页为 `null` |
 
+> 默认倒序返回（最新在前），`next_after_seq`/`cutoff_time` 取的是**最旧**一条；增量必须传 `after_seq`（此时升序，`has_more` 才有意义）。
+
 **错误**：400 `不能同时指定向前和向后游标`、404 `会话不存在`、401 session 相关。
 
 ---
@@ -2236,7 +2240,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | 404 | `会话不存在` |
 | 409 | `消息标识已用于其他内容，请刷新后重试` / `会话消息数已达上限` |
 | 429 | `发送太快，请稍后重试`（同一发送者跨会话 1 秒内只能发一条） |
-| 503 | `私信审核超时，请稍后重试` / `审核服务不可用，请稍后重试`（**不**累计违规） |
+| 503 | `私信审核超时，请稍后重试` / `审核服务不可用，请稍后重试`（或上游 moderation 返回的 `reason`）；**不**累计违规 |
 
 > 当前后端返回 `CONTENT_REJECTED` / `ACCOUNT_BANNED`；客户端代码里仍兼容判断旧标识 `DM_SEND_DISABLED`，但**服务端已不再返回**（待确认是否有历史兼容路径）。
 
@@ -2531,6 +2535,8 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `cutoff_time` | 本页最后一条 `created_at`；无结果时为 `after_time` |
 | `next_before_id` | 本页最后一条 id，可作为下一次 `before_id`；不足一页为 `null` |
 
+> 默认按 `id` 倒序（最新在前），`next_after_id`/`cutoff_time` 取的是**最旧**一条；增量请传 `after_id`（此时升序，`has_more` 才有意义）。
+
 **错误**：400 `不能同时指定向前和向后游标` / 参数校验、401 session 相关。
 
 ---
@@ -2664,7 +2670,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | 状态码 | message / 说明 |
 |---|---|
 | 400 | `请选择头像图片` |
-| 400 | `头像不能超过 5MB` |
+| 400 | `头像不能超过 5MB`（multer 的 5MB 上限通常先拦截，可能看不到这条） |
 | 400 | `头像必须为裁剪后的 512×512 JPEG 图片` |
 | 400 | `头像尺寸必须为 512×512，请在客户端重新裁剪` |
 | 400 | `头像文件无效，请在客户端重新裁剪` |
