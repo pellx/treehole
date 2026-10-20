@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../services/realtime_service.dart';
+import '../services/device_credential_store.dart';
 import '../services/dm_inbox.dart';
 import '../services/dm_notifications.dart';
 import '../widgets/app_toast.dart';
@@ -81,11 +82,18 @@ class _MainShellState extends State<MainShell> {
   }
 
   void _connectionChanged() {
-    if (RealtimeService.instance.connectionLabel.value == '未连接') {
-      DmInbox.unread.value = 0;
-      DmInbox.hasUnread.value = false;
-      unawaited(DmNotifications.clear());
-    }
+    if (RealtimeService.instance.connectionLabel.value != '未连接') return;
+    // 只有登录态真正消失（退出登录或会话被清除）时才清空未读与系统通知。
+    // 网络抖动导致短暂断线时保留已确认的未读数，恢复连接后由 refresh 校正，
+    // 否则用户会看到角标和通知凭空消失。
+    unawaited(
+      DeviceCredentialStore.getSessionId().then((id) {
+        if (id != null) return;
+        DmInbox.unread.value = 0;
+        DmInbox.hasUnread.value = false;
+        unawaited(DmNotifications.clear());
+      }).catchError((_) {}),
+    );
   }
 
   @override
