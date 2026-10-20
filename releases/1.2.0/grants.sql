@@ -3,6 +3,10 @@
 -- 默认数据库名 treehole_post；若后端 DB_NAME 不同，请先整体替换再执行。
 -- 执行前提：1.2.0 的全部迁移已按 deploy/MIGRATIONS_1.2.0.md 执行完毕，否则 GRANT 会报 1146 表不存在。
 -- 执行后立即生效，无需重启后端。
+--
+-- 现状（2026-10-20 核对生产库 treehole_post）：
+--   9 张新表均已存在，'submit-post'@'localhost' 已具备下列全部权限，本次发版无需执行本文件。
+--   GRANT 语句幂等，重复执行也无副作用；保留本文件用于新环境或重建库。
 
 -- 0) 先查看现状（只读，把结果发回即可确认是否已授权）
 SHOW GRANTS FOR 'submit-post'@'localhost';

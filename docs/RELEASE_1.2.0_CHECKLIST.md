@@ -23,7 +23,7 @@
 
 1. **先部署后端**：本版本客户端调用的私信、系统消息、举报、头像、发帖 v2 接口都依赖后端新代码与迁移。
 2. **执行 9 条迁移**：按 `deploy/MIGRATIONS_1.2.0.md` 的顺序逐条执行并校验；DDL 不可回滚，先做持久备份。
-3. **补数据库授权**：迁移不自动授权，用有 GRANT 权限的账号执行 `releases/1.2.0/grants.sql`，再用 `SHOW GRANTS FOR 'submit-post'@'localhost';` 复核；漏授权会报 `command denied`。
+3. **补数据库授权**：迁移不自动授权，用有 GRANT 权限的账号执行 `releases/1.2.0/grants.sql`，再用 `SHOW GRANTS FOR 'submit-post'@'localhost';` 复核；漏授权会报 `command denied`。（2026-10-20 已核对生产库：9 张新表齐备且授权完整，本次无需执行）
 4. **补后端环境变量**：`MODERATION_ENABLED=true`、`ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`IMG_BASE_URL`；生产环境不要设置 `TEST_MODEL=true`。
 5. **准备目录与依赖**：`/var/www/img/user-icon`、`/var/www/img/pre-upload/avatar-review` 可写；安装 libvips；反向代理放开 5MB 请求体与 90 秒超时。
 6. **重启后端**：`npm run build` 后 `pm2 restart treehole-nest`。
