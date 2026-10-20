@@ -2027,7 +2027,8 @@ GET /node/file-processor/convert/2webp/photo/1.png
 规则（`src/moderation/publish.guard.ts`）：
 
 - 缺省时服务端生成随机 UUID；一旦传入，必须匹配 `^[0-9a-f-]{36}$`（大小写不敏感，UUID 形状即可），否则 `400 无效的发布请求标识`。
-- 值会小写化后作为本次请求的 `request_key`，用于**审核结论去重**：同一用户 + 同一场景 + 同一 key 的重复请求直接复用上次结论（含 `CONTENT_REJECTED`），不会重复调用审核、也不会重复累计违规。
+- 值会小写化后作为本次请求的 `request_key`，用于**审核拒绝去重**：同一用户 + 同一场景 + 同一 key **上次被拒**时，重复请求直接复用原拒绝结论，不重复调用审核、也不重复累计违规。
+- 注意只缓存**拒绝**结论，通过不缓存：同一 key 在通过后再次提交仍会重新审核并可能创建重复内容（因此它不是发帖幂等键）。
 - 因此**同一次发布的重试必须复用同一个 key**；改动正文/图片后应换新 key（否则会拿到旧结论）。
 - 它**不是发帖幂等键**：审核通过后重复提交仍会创建多条贴文/回复。私信的消息级幂等请用 `client_message_id`（[35](#35-post-messagesdmconversationsidmessages)）。
 - 该 guard 同时会在进入业务前检查封禁状态，封禁中直接 403 `ACCOUNT_BANNED`。
@@ -2058,7 +2059,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `send_disabled` | 我的账号是否处于发布封禁（`ContentSafetyService.active`） |
 | `banned_until` / `permanent` | 解禁时间 / 是否永久封禁 |
 | `can_send` | 我能否发送：未被任一方拉黑且账号未封禁 |
-| `unread_count` | 该会话未读数（只统计对方消息） |
+| `unread_count` | 该会话未读数（只统计对方消息；免打扰会话恒为 0） |
 | `last_message` | 最近一条消息 `{content(截断 120 字), created_at}`；无消息为 `null` |
 | `sync_hash` | 状态核对用 SHA-256（64 位 hex） |
 
