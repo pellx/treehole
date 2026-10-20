@@ -536,3 +536,13 @@ src/messages/
 ## 30. 系统入口短文案与私信摘要（2026-09-30）
 
 消息页顶栏背景与下方列表一致。三个按钮显示“回复”“公告”“审核”，打开的页面仍分别为帖子回复、公告、审核与举报。按钮区域到第一条会话的距离使用 AppMessagesTheme.shortcutBottomPadding，相关入口参数均附注释。会话摘要只显示对方最后一条已审核私信；不再用消息总数占位，空会话无摘要。摘要始终单行，最大宽度由 AppMessagesTheme.conversationPreviewMaxWidth 设置，超出显示省略号。
+
+## 31. 私信请求与账号注销规则（2026-10-20，用户确认）
+
+用户明确三条决定，后续实现与文档均以此为准：
+
+1. **不做已读回执**：`last_read_seq` 仅用于本人未读计算，不向对方展示“已读”。相关接口保持现状，不新增回执字段。
+2. **注销账号不删除私信**：`dm_conversations` / `dm_messages` 在账号注销后保留。当前两张表对 `users` 的外键为 `ON DELETE RESTRICT`，硬删除用户会被阻止；后续实现注销时应改为保留数据并对用户做匿名化占位，而不是级联删除会话。
+3. **陌生人私信需先请求、对方接受后才能发送**：会话新增状态机 `pending -> accepted`（拒绝为 `rejected`）。请求方在对方接受前不能发送任何消息；接受后双方恢复现有发送流程。需新增数据库列、接受/拒绝接口、发送前校验，以及客户端的请求入口与接受界面。
+
+影响面：`dm_conversations` 增加 `status`、`requested_by`、`accepted_at`、`rejected_at`；`DmService.create` 创建为 `pending`；`DmService.send` 增加状态校验；新增 `POST /messages/dm/conversations/:id/accept` 与 `/reject`；会话列表与增量同步返回状态；客户端消息页展示待处理请求，聊天页在未接受时禁用输入框。
