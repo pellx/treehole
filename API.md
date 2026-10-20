@@ -2123,7 +2123,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 |---|---|
 | `has_more` | 仅 `after_id` 增量时有意义：`true` 表示还有下一页，继续带 `after_id=next_after_id` |
 | `next_after_id` | 本页最后一条 id（无结果时回显请求值） |
-| `next_before_id` | 向前翻页时本页最后一条 id；没有更多为 `null` |
+| `next_before_id` | 本页最后一条 id，可作为下一次 `before_id`；不足一页（没有更旧数据）为 `null` |
 | `next_before_pinned` | 与 `next_before_id` 配套的分组值（`0`/`1`），没有更多为 `null` |
 
 **错误**：400 `不能同时指定向前和向后游标`；401 `MISSING_SESSION` / `SESSION_INVALID`。
@@ -2180,7 +2180,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `has_more` | 仅 `after_seq` 增量时有意义 |
 | `next_after_seq` | 本页最后一条 `seq`（无结果回显请求值） |
 | `cutoff_time` | 本页最后一条的 `created_at`；无结果时为 `after_time` |
-| `next_before_seq` | 向前翻页时本页最后一条 `seq`；没有更多为 `null` |
+| `next_before_seq` | 本页最后一条 `seq`，可作为下一次 `before_seq`；不足一页为 `null` |
 
 **错误**：400 `不能同时指定向前和向后游标`、404 `会话不存在`、401 session 相关。
 
@@ -2529,7 +2529,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `has_more` | 仅 `after_id` 增量时有意义 |
 | `next_after_id` | 本页最后一条 id（无结果回显请求值） |
 | `cutoff_time` | 本页最后一条 `created_at`；无结果时为 `after_time` |
-| `next_before_id` | 向前翻页时本页最后一条 id；没有更多为 `null` |
+| `next_before_id` | 本页最后一条 id，可作为下一次 `before_id`；不足一页为 `null` |
 
 **错误**：400 `不能同时指定向前和向后游标` / 参数校验、401 session 相关。
 
