@@ -9,20 +9,21 @@
 | 版本号升级到 `1.2.0+5` | 完成 | `pubspec.yaml`、`lib/models/version_info.dart`（`4cda76d`） |
 | 1.2.0 更新日志 | 完成 | `CHANGELOG.md`（`3734173`） |
 | versions 表 SQL | 已生成，待人工执行 | `releases/1.2.0/apply.sql`、`rollback.sql`（`2f4a137`） |
-| 9 条数据库迁移与执行顺序 | 完成 | `deploy/MIGRATIONS_1.2.0.md`（`55b7d88`） |
+| 10 条数据库迁移与执行顺序 | 完成 | `deploy/MIGRATIONS_1.2.0.md`；新增 `20261020_add_dm_conversation_requests.sql` |
+| 陌生人私信请求（后端 + 客户端） | 完成，待部署 | 后端 `99b6427`、客户端 `bec150c`；`API.md` 36.1/36.2 |
 | 新接口文档 | 完成，含 6 处「待确认」 | `API.md`（`26bb29a`、`ab31f5a`、`b8521a6`） |
 | 断线不清空未读角标 | 完成 | `58a5e31`、`deff2ba` |
 | 消息缓存异常自恢复 | 完成 | `99119a3` |
 | 作者菜单文案改为「私信」 | 完成 | `bf1b019` |
 | 静态检查 | 通过 | `dart analyze lib test`：0 error / 0 warning / 0 info |
-| 自动化测试 | 通过 | `flutter test`：77 个用例全部通过 |
+| 自动化测试 | 通过 | `flutter test`：81 个用例全部通过；后端 `npx jest src/messages`：42 个用例通过 |
 | 离线发版预检 | 通过 | `preflight.ps1 -Version 1.2.0 -Offline` 返回 0 |
 | 工作区状态 | 干净，`main` 与 `origin/main` 一致 | — |
 
 ## 二，发版前必须人工完成（按顺序）
 
-1. **先部署后端**：本版本客户端调用的私信、系统消息、举报、头像、发帖 v2 接口都依赖后端新代码与迁移。
-2. **执行 9 条迁移**：按 `deploy/MIGRATIONS_1.2.0.md` 的顺序逐条执行并校验；DDL 不可回滚，先做持久备份。
+1. **先部署后端**：本版本客户端调用的私信、系统消息、举报、头像、发帖 v2 接口都依赖后端新代码与迁移；私信请求功能需要后端 `99b6427`（含 `accept`/`reject` 路由）。
+2. **执行 10 条迁移**：按 `deploy/MIGRATIONS_1.2.0.md` 的顺序逐条执行并校验；第 10 条 `20261020_add_dm_conversation_requests.sql` 尚未在生产执行，务必补跑。DDL 不可回滚，先做持久备份。
 3. **补数据库授权**：迁移不自动授权，用有 GRANT 权限的账号执行 `releases/1.2.0/grants.sql`，再用 `SHOW GRANTS FOR 'submit-post'@'localhost';` 复核；漏授权会报 `command denied`。（2026-10-20 已核对生产库：9 张新表齐备且授权完整，本次无需执行）
 4. **补后端环境变量**：`MODERATION_ENABLED=true`、`ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`IMG_BASE_URL`；生产环境不要设置 `TEST_MODEL=true`。
 5. **准备目录与依赖**：`/var/www/img/user-icon`、`/var/www/img/pre-upload/avatar-review` 可写；安装 libvips；反向代理放开 5MB 请求体与 90 秒超时。
@@ -36,6 +37,7 @@
 ## 三，发版前必须验证
 
 - 真机双账号：私信收发、已读游标、置顶 / 免打扰 / 拉黑、前台本地通知、系统消息与公告、举报 3 人后隐藏、头像裁剪后上传与审核结果展示。
+- 真机双账号（私信请求）：新会话发起后双方都无法发送 → 接收方在会话列表点「同意」后可互发；点「拒绝」后发起方看到拒绝文案，24 小时内重复发起返回 429，到期后可重新申请；升级前的老会话仍可直接发送。
 - 弱网与断线：断线重连后未读角标不被清零；消息失败可重试且不重复。
 - 升级路径：覆盖安装 1.1.2 → 1.2.0，确认证书与签名一致、可正常升级。
 - 兼容窗口：1.1.2 客户端上传图片不携带 session，新后端 `SessionGuard` 会返回 401；后端先上线会短暂影响旧客户端上传，建议把客户端发布贴近后端上线，或接受该窗口。

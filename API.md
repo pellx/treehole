@@ -2092,6 +2092,12 @@ GET /node/file-processor/convert/2webp/photo/1.png
       "id": 12,
       "peer_user_id": 9,
       "last_seq": 42,
+      "status": "accepted",
+      "requested_by": null,
+      "requested_at": null,
+      "accepted_at": null,
+      "rejected_at": null,
+      "is_requester": false,
       "updated_at": "2026-09-29T10:00:00.000Z",
       "peer": {
         "user_id": 9,
@@ -2123,6 +2129,10 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | 字段 | 说明 |
 |---|---|
 | `has_more` | 仅 `after_id` 增量时有意义：`true` 表示还有下一页，继续带 `after_id=next_after_id` |
+| `status` | 私信请求状态：`pending` 待接受、`accepted` 已接受（可直接发送）、`rejected` 已拒绝（发起方 24 小时冷却） |
+| `requested_by` | 发起请求的 `user_id`，`status` 为 `accepted` 的老会话为 `null` |
+| `is_requester` | 当前用户是否是该请求的发起方，决定 UI 显示「等待对方接受」还是「同意/拒绝」 |
+| `can_send` | 是否允许发送：`status != 'accepted'`、任一方拉黑、处罚期内均为 `false` |
 | `next_after_id` | 本页最后一条 id（无结果时回显请求值） |
 | `next_before_id` | 本页最后一条 id，可作为下一次 `before_id`；不足一页（没有更旧数据）为 `null` |
 | `next_before_pinned` | 与 `next_before_id` 配套的分组值（`0`/`1`），没有更多为 `null` |
@@ -2238,6 +2248,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | 401 | `MISSING_SESSION` / `SESSION_INVALID` |
 | 403 | `当前无法向该用户发送私信`（任一方拉黑） |
 | 403 | `ACCOUNT_BANNED` / `CONTENT_REJECTED`（body 带 `code`，见 [统一错误格式](#统一错误格式)） |
+| 403 | `对方接受私信请求后才能发送消息`（发起方等待中）/ `请先接受对方的私信请求`（接收方未处理） |
 | 404 | `会话不存在` |
 | 409 | `消息标识已用于其他内容，请刷新后重试` / `会话消息数已达上限` |
 | 429 | `发送太快，请稍后重试`（同一发送者跨会话 1 秒内只能发一条） |
@@ -2250,6 +2261,14 @@ GET /node/file-processor/convert/2webp/photo/1.png
 ### 36. POST /messages/dm/conversations
 
 创建（或取回）与某用户的私信会话。会话按用户对归一化（`min(user)` / `max(user)`），因此双方重复调用只会得到一个会话。
+
+**陌生私信规则（2026-10-20 起）**
+
+- 新建会话一律是 `status = "pending"` 的**私信请求**：请求方先发出请求，接收方接受后才能互发消息。
+- 请求**不带附言**；发起方在请求等待期间调用发送接口会得到 403。
+- 双方之间已有 `accepted` 会话时（含 1.2.0 之前创建的老会话）直接复用，不会退回请求状态。
+- 接收方拒绝后进入 `rejected`；同一请求方 **24 小时**内重复调用本接口返回 429，到期后可重新发起 `pending`。
+- 请求被接受或拒绝都会实时推送给双方。
 
 **请求**
 
@@ -2266,7 +2285,18 @@ GET /node/file-processor/convert/2webp/photo/1.png
 ```json
 {
   "user_id": 7,
-  "conversation": { "id": 12, "peer_user_id": 9, "last_seq": 0 }
+  "conversation": {
+    "id": 12,
+    "peer_user_id": 9,
+    "last_seq": 0,
+    "status": "pending",
+    "requested_by": 7,
+    "requested_at": "2026-10-20T12:00:00.000Z",
+    "accepted_at": null,
+    "rejected_at": null,
+    "is_requester": true,
+    "can_send": false
+  }
 }
 ```
 
@@ -2278,8 +2308,49 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | 401 | session 相关 |
 | 403 | `当前无法向该用户发送私信`（任一方拉黑） |
 | 404 | `用户不存在` |
+| 429 | `请求过于频繁，请 24 小时后再试`（被拒绝后的冷却期内重复发起） |
 
-> 客户端 `dm_api.dart` 里还有 `conversations/from-post` 的缓存分支，但后端**没有该路由**（直接调用会 404）。是否为未实现的「从贴文发起私信」**待确认**；当前请只用本接口按 `peer_user_id` 建会话。
+> `POST /messages/dm/conversations/from-post` 用凭 `post_id` 找作者后走同一套创建逻辑，返回结构与本接口一致（作者匿名的贴文返回 404，不暴露身份）。
+
+---
+
+### 36.1 POST /messages/dm/conversations/:id/accept
+
+接收方接受私信请求，会话转为 `accepted`，双方立即可发送。
+
+**请求**：无 body。
+
+**响应**
+
+```json
+{ "conversation": { "id": 12, "status": "accepted", "can_send": true } }
+```
+
+**错误**
+
+| 状态码 | message |
+|---|---|
+| 400 | `该私信请求已失效`（不是 `pending`，例如已拒绝或已接受） |
+| 403 | `不能接受自己发出的私信请求`（发起方不能自己接受） |
+| 404 | `会话不存在`（非会话参与者同样返回 404） |
+
+---
+
+### 36.2 POST /messages/dm/conversations/:id/reject
+
+接收方拒绝私信请求，会话转为 `rejected`；发起方 24 小时后可重新申请。
+
+**请求**：无 body。
+
+**响应**
+
+```json
+{ "conversation": { "id": 12, "status": "rejected", "can_send": false } }
+```
+
+**错误**：400 `该私信请求已失效`、403 `不能拒绝自己发出的私信请求`、404 `会话不存在`。
+
+> 拒绝不删除历史数据；1.2.0 之前的会话默认为 `accepted`，不会被重新置为请求状态。
 
 ---
 
@@ -2326,13 +2397,14 @@ GET /node/file-processor/convert/2webp/photo/1.png
 **响应**
 
 ```json
-{ "user_id": 7, "unread_count": 5, "total_unread_count": 9 }
+{ "user_id": 7, "unread_count": 5, "total_unread_count": 9, "pending_request_count": 1 }
 ```
 
 | 字段 | 说明 |
 |---|---|
 | `unread_count` | 私信未读（**不含**已免打扰会话）+ 系统消息未读 |
 | `total_unread_count` | 私信未读（**含**免打扰会话）+ 系统消息未读 |
+| `pending_request_count` | 待我处理的私信请求数（只统计 `requested_by <> 我` 的 `pending` 会话，不计入上面两个未读数） |
 
 `systemCount` 来自 [44. GET /messages/system/summary](#44-get-messagessystemsummary) 的 `unread_count`。
 

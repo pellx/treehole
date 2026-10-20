@@ -546,3 +546,11 @@ src/messages/
 3. **陌生人私信需先请求、对方接受后才能发送**：会话新增状态机 `pending -> accepted`（拒绝为 `rejected`）。请求方在对方接受前不能发送任何消息；接受后双方恢复现有发送流程。需新增数据库列、接受/拒绝接口、发送前校验，以及客户端的请求入口与接受界面。
 
 影响面：`dm_conversations` 增加 `status`、`requested_by`、`accepted_at`、`rejected_at`；`DmService.create` 创建为 `pending`；`DmService.send` 增加状态校验；新增 `POST /messages/dm/conversations/:id/accept` 与 `/reject`；会话列表与增量同步返回状态；客户端消息页展示待处理请求，聊天页在未接受时禁用输入框。
+### 31.1 实现记录（2026-10-20）
+
+已按上述决定落地，后端提交 99b6427、客户端提交 bec150c：
+
+- 数据库：database/migrations/20261020_add_dm_conversation_requests.sql（列 status/equested_by/equested_at/ccepted_at/ejected_at + idx_dm_status），默认 ccepted 保证老会话不被锁死；镜像在 deploy/20261020_add_dm_conversation_requests.sql。
+- 后端：DmService.create 新建会话写 pending，重复请求幂等；被拒绝后 24 小时内返回 429；新增 ccept/eject（仅接收方可调用）；persistSend 在非 ccepted 时返回 403；会话列表、历史、未读汇总返回状态与 pending_request_count。
+- 客户端：会话行显示「请求」标记与同意/拒绝按钮；聊天页在未接受时展示提示条并隐藏输入框，发起方只看到等待/被拒绝文案；DmApi.accept/reject 封装接口。
+- 测试：后端 src/messages/dm-request.spec.ts 等 42 个用例通过；客户端 	est/dm_request_test.dart 覆盖接收、等待、拒绝与会话行按钮。
