@@ -15,7 +15,7 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
 
 - **新增私信 API**（[私信 API](#私信-api)）
   - 会话列表 / 历史 / 发送、已读游标、置顶 / 免打扰 / 拉黑、未读汇总、全量已读、增量状态核对
-  - 发送使用客户端 UUID `client_message_id` 幂等；文本先过审核，未通过不落库、不投递
+  - 发送使用客户端 UUID `client_message_id` 幂等；文本先过审核，未通过不写私信、不投递（会写一条审核系统消息）
 - **新增系统消息 API**（[系统消息 API](#系统消息-api)）
   - `announcement` / `moderation` / `reply` 三类；分类未读摘要、分页列表、单条已读、增量状态核对
 - **新增举报与可见性核对**（[举报 API](#举报-api)、[27b. POST /posts/visibility](#27b-post-postsvisibility)）
@@ -27,7 +27,7 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
   - 新增 `GET /posts/v2/:id`，返回 `hidden` / `hidden_comment_ids`
 - **统一错误码与发布重试**
   - `MISSING_SESSION` / `SESSION_INVALID` / `ACCOUNT_BANNED` / `CONTENT_REJECTED`
-  - `x-publish-id` 作为发布/上传的**审核结论去重键**（不是发帖幂等键，见 [x-publish-id 约定](#x-publish-id-约定)）
+  - `x-publish-id` 作为发布/上传的**审核拒绝去重键**（不是发帖幂等键，见 [x-publish-id 约定](#x-publish-id-约定)）
 
 ### 2026-08
 
@@ -1329,7 +1329,7 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 > ⚠️ **已停用（410 Gone）**：服务端 `createPost` 现在直接抛出 `410 旧版匿名发布接口已停用，请使用登录后的 v2 接口`。
 > 新客户端请改用 [21b. POST /posts/v2](#21b-post-postsv2)。以下字段说明仅保留给旧客户端排障。
 
-🔒 创建贴文（含可选图片/附件）。标题+正文会做文本审核。
+旧接口字段（仅历史参考；当前参数校验通过的请求一律 410，不会审核或创建内容）：
 
 **请求**（停用前的字段，仅作历史参考；当前一律 410）
 
@@ -1385,13 +1385,12 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 }
 ```
 
-**错误（节选）**
+**错误**
 
 | 状态码 | 说明 |
 |---|---|
-| 400 | 文件不存在 / 超限 / 内容审核未通过 |
-| 401 | `MISSING_SESSION` / `SESSION_INVALID` |
-| 500 | 发布失败 |
+| 410 | `旧版匿名发布接口已停用，请使用登录后的 v2 接口` |
+| 400 | 参数校验失败（进入 service 之前） |
 
 ---
 
@@ -1473,7 +1472,7 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 > ⚠️ **已停用（410 Gone）**：服务端 `createReply` 现在直接抛出 `410 旧版匿名发布接口已停用，请使用登录后的 v2 接口`。
 > 新客户端请改用 [22b. POST /posts/v2/comment](#22b-post-postsv2comment)。
 
-🔒 创建回复/评论。
+旧接口字段（仅历史参考；当前参数校验通过后立即 410，不会创建回复）：
 
 **请求**
 
@@ -3516,7 +3515,20 @@ ALTER TABLE fingerprints DROP INDEX uk_fingerprints_hash;
 -- ALTER TABLE fingerprints ADD INDEX idx_fingerprints_hash (fingerprint_hash);
 ```
 
-1.2.0 新增表结构（按文件名顺序执行，均见 `database/migrations/`）：
+历史迁移示例：
+
+```sql
+ALTER TABLE users CHANGE user_external_token user_token VARCHAR(128);
+ALTER TABLE users DROP INDEX IF EXISTS idx_external_token;
+ALTER TABLE users DROP INDEX IF EXISTS uk_external_token;
+ALTER TABLE users ADD INDEX idx_user_token (user_token);
+ALTER TABLE users ADD UNIQUE INDEX uk_user_token (user_token);
+
+ALTER TABLE user_identifier_history CHANGE old_value value VARCHAR(255);
+ALTER TABLE devices DROP COLUMN IF EXISTS unique_token;
+```
+
+**1.2.0 新增表结构**（按文件名顺序执行，均见 `database/migrations/`）：
 
 ```text
 20260927_add_user_avatar.sql                  users.avatar_filename
@@ -3531,19 +3543,6 @@ ALTER TABLE fingerprints DROP INDEX uk_fingerprints_hash;
 ```
 
 除 `20260929`（`CREATE TABLE IF NOT EXISTS`）外均不可重复执行，重复执行会因列/表已存在而报错；MySQL DDL 非事务，失败后需按各文件头注释人工核对再继续。
-
-历史迁移示例：
-
-```sql
-ALTER TABLE users CHANGE user_external_token user_token VARCHAR(128);
-ALTER TABLE users DROP INDEX IF EXISTS idx_external_token;
-ALTER TABLE users DROP INDEX IF EXISTS uk_external_token;
-ALTER TABLE users ADD INDEX idx_user_token (user_token);
-ALTER TABLE users ADD UNIQUE INDEX uk_user_token (user_token);
-
-ALTER TABLE user_identifier_history CHANGE old_value value VARCHAR(255);
-ALTER TABLE devices DROP COLUMN IF EXISTS unique_token;
-```
 
 ---
 
