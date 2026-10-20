@@ -29,7 +29,7 @@ void main() {
     await tester.tap(find.byTooltip('私信作者'));
     await tester.pumpAndSettle();
     final name = tester.getRect(find.text('作者').first);
-    final menu = tester.getRect(find.text('回复').last);
+    final menu = tester.getRect(find.text('私信').last);
     expect(menu.top, greaterThanOrEqualTo(name.bottom));
     expect(menu.left, greaterThanOrEqualTo(0));
     expect(menu.right, lessThanOrEqualTo(320));

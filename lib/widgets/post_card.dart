@@ -1467,9 +1467,9 @@ class _TitleAuthorRow extends StatelessWidget {
           onSelected: (_) => onMessageAuthor(),
           itemBuilder: (_) => const [
             PopupMenuItem<String>(
-              value: 'reply',
+              value: 'message',
               height: 40,
-              child: Text('回复'),
+              child: Text('私信'),
             ),
           ],
           child: Text.rich(
