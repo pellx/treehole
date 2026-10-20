@@ -23,14 +23,15 @@
 
 1. **先部署后端**：本版本客户端调用的私信、系统消息、举报、头像、发帖 v2 接口都依赖后端新代码与迁移。
 2. **执行 9 条迁移**：按 `deploy/MIGRATIONS_1.2.0.md` 的顺序逐条执行并校验；DDL 不可回滚，先做持久备份。
-3. **补后端环境变量**：`MODERATION_ENABLED=true`、`ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`IMG_BASE_URL`；生产环境不要设置 `TEST_MODEL=true`。
-4. **准备目录与依赖**：`/var/www/img/user-icon`、`/var/www/img/pre-upload/avatar-review` 可写；安装 libvips；反向代理放开 5MB 请求体与 90 秒超时。
-5. **重启后端**：`npm run build` 后 `pm2 restart treehole-nest`。
-6. **打包并上传 APK**：四个 ABI 包按 `build*10000 + ABI 偏移` 生成 versionCode（本版本 50000 / 51000 / 52000 / 53000），上传到 `/var/www/img/flutter_app_version/v1.2.0/`。
-7. **写 versions 表**：在 MySQL 中执行 `releases/1.2.0/apply.sql`，确认 `versions` 里 1.2.0 只有一条且为最新后再 `COMMIT`。
-8. **打 tag**：`v1.2.0` 并在验证后推送，保留 `v1.2.0-android` 的既有约定。
-9. **iOS 上传**：`gh workflow run ios.yml --ref main -f version=1.2.0`，确认 TestFlight 外部测试组可见。
-10. **确认构建号**：App Store Connect 中 build 5 未被占用。
+3. **补数据库授权**：迁移不自动授权，用有 GRANT 权限的账号执行 `releases/1.2.0/grants.sql`，再用 `SHOW GRANTS FOR 'submit-post'@'localhost';` 复核；漏授权会报 `command denied`。
+4. **补后端环境变量**：`MODERATION_ENABLED=true`、`ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`、`IMG_BASE_URL`；生产环境不要设置 `TEST_MODEL=true`。
+5. **准备目录与依赖**：`/var/www/img/user-icon`、`/var/www/img/pre-upload/avatar-review` 可写；安装 libvips；反向代理放开 5MB 请求体与 90 秒超时。
+6. **重启后端**：`npm run build` 后 `pm2 restart treehole-nest`。
+7. **打包并上传 APK**：四个 ABI 包按 `build*10000 + ABI 偏移` 生成 versionCode（本版本 50000 / 51000 / 52000 / 53000），上传到 `/var/www/img/flutter_app_version/v1.2.0/`。
+8. **写 versions 表**：在 MySQL 中执行 `releases/1.2.0/apply.sql`，确认 `versions` 里 1.2.0 只有一条且为最新后再 `COMMIT`。
+9. **打 tag**：`v1.2.0` 并在验证后推送，保留 `v1.2.0-android` 的既有约定。
+10. **iOS 上传**：`gh workflow run ios.yml --ref main -f version=1.2.0`，确认 TestFlight 外部测试组可见。
+11. **确认构建号**：App Store Connect 中 build 5 未被占用。
 
 ## 三，发版前必须验证
 

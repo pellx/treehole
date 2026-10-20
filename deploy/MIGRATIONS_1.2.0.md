@@ -34,6 +34,19 @@ SHOW COLUMNS FROM user_violation_history LIKE 'source';
 SELECT COUNT(*) FROM message_publish_lock;  -- 期望 1
 ```
 
+## 授权
+
+迁移只改表结构，不会自动给应用账号加权限。第 8 条 `RENAME TABLE` 之后旧授权也会失效，因此必须单独补授权：
+
+1. 用有 GRANT 权限的账号执行 `releases/1.2.0/grants.sql`（默认数据库名 `treehole_post`，账号 `submit-post`@`localhost`；DB_NAME 不同就先整体替换）。
+2. 执行后复核，应能看到各新表权限且不再出现 `command denied`：
+
+```sql
+SHOW GRANTS FOR 'submit-post'@'localhost';
+```
+
+3. 权限只在授权语句执行失败时才需要排查（常见原因：表不存在，说明对应迁移没跑）。
+
 ## 已知约束
 
 - 第 8 条使用 `RENAME TABLE`，MySQL 的表级授权不会随表名迁移；执行后需要重新确认后端账号对新表名的权限，备份脚本里的旧表名也要同步修改。
