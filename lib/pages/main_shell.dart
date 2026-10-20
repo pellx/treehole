@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../services/realtime_service.dart';
+import '../services/account_display.dart';
 import '../services/device_credential_store.dart';
 import '../services/dm_inbox.dart';
 import '../services/dm_notifications.dart';
@@ -37,6 +38,7 @@ class _MainShellState extends State<MainShell> {
     };
     unawaited(DmNotifications.initialize().catchError((_) {}));
     RealtimeService.instance.connectionLabel.addListener(_connectionChanged);
+    accountDisplayEpoch.addListener(_accountChanged);
     _dmSubscription = RealtimeService.instance.dmEvents.listen((event) {
       DmInbox.refresh();
       if (event.notify &&
@@ -96,10 +98,26 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
+  /// 退出登录或被踢下线后账号展示会刷新：此时按登录态清空角标或重新拉取，
+  /// 避免 MainShell 一直显示上一个账号的未读数。
+  void _accountChanged() {
+    unawaited(
+      DeviceCredentialStore.getSessionId().then((id) async {
+        if (id == null) {
+          DmInbox.reset();
+          await DmNotifications.clear();
+        } else {
+          await DmInbox.refresh();
+        }
+      }).catchError((_) {}),
+    );
+  }
+
   @override
   void dispose() {
     _dmSubscription?.cancel();
     RealtimeService.instance.connectionLabel.removeListener(_connectionChanged);
+    accountDisplayEpoch.removeListener(_accountChanged);
     DmNotifications.onOpenMessages = null;
     super.dispose();
   }

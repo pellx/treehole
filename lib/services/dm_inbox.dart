@@ -9,6 +9,12 @@ class DmInbox {
   static bool _busy = false;
   static bool _pending = false;
 
+  /// 清空角标（退出登录或被踢下线），不触发网络请求。
+  static void reset() {
+    unread.value = 0;
+    hasUnread.value = false;
+  }
+
   static Future<void> refresh() async {
     if (_busy) {
       _pending = true;
