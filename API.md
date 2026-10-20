@@ -3508,6 +3508,22 @@ ALTER TABLE fingerprints DROP INDEX uk_fingerprints_hash;
 -- ALTER TABLE fingerprints ADD INDEX idx_fingerprints_hash (fingerprint_hash);
 ```
 
+1.2.0 新增表结构（按文件名顺序执行，均见 `database/migrations/`）：
+
+```text
+20260927_add_user_avatar.sql                  users.avatar_filename
+20260928_create_dm_tables.sql                 私信会话 / 消息
+20260928_create_message_preferences.sql       免打扰 / 拉黑（按 user+peer 存）
+20260928_add_dm_read_cursor.sql               preferences.last_read_seq
+20260928_add_pinned_and_system_inbox.sql      preferences.pinned + system_messages
+20260928_add_dm_moderation.sql                dm_user_controls / dm_rejections
+20260928_add_content_reports.sql              posts/comments.is_hidden + content_reports
+20260928_generalize_user_safety.sql           重命名为 user_controls / user_violation_history + 处罚等级列
+20260929_add_message_publish_lock.sql         message_publish_lock 单例（串行化消息发布）
+```
+
+除 `20260929`（`CREATE TABLE IF NOT EXISTS`）外均不可重复执行，重复执行会因列/表已存在而报错；MySQL DDL 非事务，失败后需按各文件头注释人工核对再继续。
+
 历史迁移示例：
 
 ```sql
