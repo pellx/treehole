@@ -5,6 +5,8 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
 除文件上传外，请求/响应均为 `Content-Type: application/json`。  
 受保护接口（标注 🔒）需在 body 或 header 携带 session：`session_id` / `session_secret`（或 `x-session-id` / `x-session-secret`）。
 
+> 1.2.0 新增的私信、系统消息、举报、头像接口的 DTO **没有** `session_id` / `session_secret` 字段，必须用 header；放进 body 会被 `forbidNonWhitelisted` 判为 400。发帖 v2 相反，body 也必须带这两个字段。详见各章「鉴权」。
+
 ---
 
 ## 最近更新
@@ -25,7 +27,7 @@ Base URL: `http://<host>:7300/node`（`GLOBAL_PREFIX` 默认 `node`，端口默�
   - 新增 `GET /posts/v2/:id`，返回 `hidden` / `hidden_comment_ids`
 - **统一错误码与发布幂等**
   - `MISSING_SESSION` / `SESSION_INVALID` / `ACCOUNT_BANNED` / `CONTENT_REJECTED`
-  - `x-publish-id` 作为发布/上传重试的幂等键（见 [x-publish-id 约定](#x-publish-id-约定)）
+  - `x-publish-id` 作为发布/上传的**审核结论去重键**（不是发帖幂等键，见 [x-publish-id 约定](#x-publish-id-约定)）
 
 ### 2026-08
 
@@ -1329,7 +1331,7 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 
 🔒 创建贴文（含可选图片/附件）。标题+正文会做文本审核。
 
-**请求** `201`（路由未显式设状态码时以实际为准；业务成功返回贴文对象）
+**请求**（停用前的字段，仅作历史参考；当前一律 410）
 
 ```json
 {
@@ -1352,6 +1354,10 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 | `content` | 可选 |
 | `is_anonymous` | 可选，默认 `false`；为 `true` 时对外 `author` 为 `null` |
 | `category` | 可选，`问答` \| `资料` \| `兴趣` \| `梗图`；缺省时先存「默认」，再由 AI 异步分类更新（见下） |
+| `uploaded` | 可选，最多 13 项；图片合计 ≤12 张且总大小 ≤8MB；单附件 ≤3.5MB |
+| `uploaded[].type` | `image` \| `attachment` |
+| `uploaded[].filename` | 预上传返回的服务端文件名 |
+| `uploaded[].original` | 附件建议传原始文件名 |
 
 **AI 自动分类**（缺省 `category` 时）：
 
@@ -1360,10 +1366,6 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 - 分类为异步：发帖响应不等待模型，返回时 `category` 为「默认」，随后自动更新到 MySQL 与 ES 索引（前端可刷新列表看到最终品类）
 - 显式传了 `category` 的帖子**不触发** AI 分类，尊重用户选择
 - 未配置 `SILICONFLOW_API_KEY` 时跳过 AI 分类，等价于全部「默认」
-| `uploaded` | 可选，最多 13 项；图片合计 ≤12 张且总大小 ≤8MB；单附件 ≤3.5MB |
-| `uploaded[].type` | `image` \| `attachment` |
-| `uploaded[].filename` | 预上传返回的服务端文件名 |
-| `uploaded[].original` | 附件建议传原始文件名 |
 
 **响应（公开字段）**
 
@@ -1822,7 +1824,7 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 | `GET /posts/:id`、`GET /posts/v2/:id` | `{ "id": 100, "hidden": true }` | 无正文/作者；`comments` 等字段也不返回 |
 | `GET /posts/comment/:id` | `{ "id": 55, "post_id": 100, "hidden": true }` | 回复自身隐藏，或所属贴文隐藏 |
 | `POST /posts/idListUpdate` | `"101": { "id": 101, "hidden": true }` | 其余 id 仍返回值或 `update_at` |
-| `GET /posts/visibility` | `hidden_posts` / `hidden_comments` | 批量核对 |
+| `POST /posts/visibility` | `hidden_posts` / `hidden_comments` | 批量核对 |
 
 补充约定：
 
@@ -1844,7 +1846,11 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 - 可选 header `x-publish-id`（同一上传重试复用，见 [x-publish-id 约定](#x-publish-id-约定)）；服务端用它做审核去重。
 - 该路由挂了 `SessionGuard` + `PublishGuard`：账号封禁期间上传直接 403。
 
-限制：总大小硬上限 **8MB**（multer 层）；`type=image` ≤8MB，其他按附件计 ≤3.5MB。图片会做内容审核。允许扩展名包括常见图片与文本/代码等（见服务端白名单）。
+限制：multer 层总大小硬上限 **8MB**；业务层 `type=image` ≤8MB、其他（含不传 `type`）≤3.5MB。扩展名白名单：
+
+`asc` `txt` `log` `conf` `nfo` `me` `tsv` `ics` `vcs` `vcf` `c` `h` `cpp` `cxx` `py` `java` `prel` `pl` `lua` `yaml` `yml` `kt` `jpg` `jpeg` `png` `gif` `webp`
+
+其中图片扩展名（`jpg/jpeg/png/gif/webp`）无论 `type` 传什么都会走图片审核；`type=image` 但扩展名不是图片 → 400。
 
 **错误**
 
@@ -1856,7 +1862,7 @@ Session 须对应本机活绑定（`user_id` + `device_id`）。
 | 400 | `图片格式不正确` |
 | 401 | `MISSING_SESSION` / `SESSION_INVALID` |
 | 403 | `ACCOUNT_BANNED` / `CONTENT_REJECTED` |
-| 413 | 超过 8MB 时由 multer 抛出（具体文案待确认） |
+| 待确认 | 超过 8MB 时由 multer 抛 `LIMIT_FILE_SIZE`，后端未做错误映射，实际状态码/文案**待确认**（可能 500） |
 
 **响应**
 
@@ -1978,14 +1984,14 @@ GET /node/file-processor/convert/2webp/photo/1.png
 |---|---|
 | `code` | `CONTENT_REJECTED`（本次内容未过审）或 `ACCOUNT_BANNED`（账号封禁中） |
 | `message` | 拒绝原因 / 封禁提示（永久封禁时为「账号已永久封禁，禁止一切发布行为」） |
-| `banned_until` | 解禁时间（ISO8601）；永久封禁或未封禁为 `null` |
+| `banned_until` | 解禁时间（ISO8601）；永久封禁为 `null`。可能残留**已过期**的历史时间，判断当前是否封禁请看 `code`，不要只看该字段 |
 | `permanent` | 是否永久封禁 |
 
 **新增接口涉及的错误码**
 
 | 状态码 | 错误标识 / message | 出现位置 |
 |---|---|---|
-| 400 | `MISSING_SESSION` 之外的校验错误（数组） | 全部带 DTO 的接口 |
+| 400 | 参数校验失败（`message` 为字符串数组） | 全部带 DTO 的接口 |
 | 401 | `MISSING_SESSION` | 未携带 session 的受保护接口 |
 | 401 | `SESSION_INVALID` | session 不存在 / secret 不匹配 |
 | 403 | `ACCOUNT_BANNED` | 发帖、回复、上传、头像、改名、私信发送 |
@@ -2284,7 +2290,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 
 | 字段 | 必填 | 说明 |
 |---|---|---|
-| `last_read_seq` | 是 | 已读到的消息 `seq`（0–4294967295；0 表示清空） |
+| `last_read_seq` | 是 | 已读到的消息 `seq`（0–4294967295）；服务端只前进不后退，传 0 不会清空或回退 |
 
 **响应**：`{ "success": true }`
 
@@ -2423,7 +2429,9 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | `dm.changed` | `{ "conversation_id": 12, "notify": true }` | 新私信、已读游标变化、置顶/免打扰/拉黑变化 |
 | `system.changed` | `{}` | 新增系统消息 / 审核与举报通知 |
 
-`notify` 表示该会话是否允许本地通知（对方免打扰/拉黑时为 `false`）。事件鉴权失败会直接断开连接。
+`conversation_id = 0` 表示「全部会话」（`read-all` 触发），收到后整体刷新会话列表。
+
+`notify` 为 `false` 时只静默刷新、不弹本地通知：可能因为对端免打扰/拉黑，也可能是发给发送者本人的回执。事件鉴权失败会直接断开连接。
 
 ---
 
@@ -2551,7 +2559,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 { "items": [], "removed_ids": [10] }
 ```
 
-`removed_ids` 表示不可再访问（被删除/不再可见）的消息 id。
+`removed_ids` 表示不可再访问（被删除、不再可见，或不属于该 `category`）的消息 id。
 
 ---
 
@@ -2666,7 +2674,7 @@ GET /node/file-processor/convert/2webp/photo/1.png
 | 429 | `头像上传过于频繁，请稍后重试` |
 | 503 | `头像审核超时，请稍后重试`（服务端 45 秒）/ `头像校验服务暂时不可用` / `内容审核服务暂不可用，请稍后重试` |
 
-> 客户端 HTTP 超时按 **90 秒**设置（审核在请求内完成）。超过 5MB 时 multer 可能先返回 413，具体响应文案**待确认**。
+> 客户端 HTTP 超时按 **90 秒**设置（审核在请求内完成）。超过 5MB、多文件、额外字段会先被 multer 拦截（`LIMIT_FILE_SIZE` / `LIMIT_FILE_COUNT` / `LIMIT_FIELD_COUNT`），但后端未做错误映射，**实际状态码与响应体待确认**（可能 500，且不是上表的业务文案）。
 
 ---
 
@@ -3080,7 +3088,7 @@ io('https://<host>', {
 
 | 字段 | 含义 |
 |---|---|
-| `conversation_id` | 发生变化的会话 id |
+| `conversation_id` | 发生变化的会话 id；`0` 表示全部会话（`read-all`） |
 | `notify` | 是否允许本地通知；`false` 表示对方免打扰/拉黑等，只需静默刷新 |
 
 触发：新私信、已读游标、置顶/免打扰/拉黑变化。每条推送前会重新校验 session，失败则断开连接。
