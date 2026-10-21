@@ -65,7 +65,10 @@ class _DmTestPageState extends State<DmTestPage> {
                 children: [
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: _store.enabled ? _openMessages : _store.enable,
+                      onPressed: () {
+                        if (!_store.enabled) _store.enable();
+                        _openMessages();
+                      },
                       icon: const Icon(Icons.forum_outlined),
                       label: Text(_store.enabled ? '去消息页查看' : '启用并去消息页'),
                     ),
