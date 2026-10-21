@@ -2,6 +2,7 @@ import 'dart:async';
 import '../services/realtime_service.dart';
 import '../services/account_display.dart';
 import '../services/device_credential_store.dart';
+import '../services/app_tab_request.dart';
 import '../services/dm_inbox.dart';
 import '../services/dm_notifications.dart';
 import '../widgets/app_toast.dart';
@@ -56,6 +57,7 @@ class _MainShellState extends State<MainShell> {
       }
     });
     DmInbox.refresh();
+    AppTabRequest.pending.addListener(_onTabRequested);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_remindNotificationPermission());
     });
@@ -116,6 +118,7 @@ class _MainShellState extends State<MainShell> {
   @override
   void dispose() {
     _dmSubscription?.cancel();
+    AppTabRequest.pending.removeListener(_onTabRequested);
     RealtimeService.instance.connectionLabel.removeListener(_connectionChanged);
     accountDisplayEpoch.removeListener(_accountChanged);
     DmNotifications.onOpenMessages = null;
@@ -148,6 +151,14 @@ class _MainShellState extends State<MainShell> {
       HapticFeedback.lightImpact();
       setState(() => _currentIndex = index);
     }
+  }
+
+  /// 消息模块测试页要求跳到某个 Tab（目前只有「消息」）。
+  void _onTabRequested() {
+    final index = AppTabRequest.pending.value;
+    if (index == null || !mounted) return;
+    AppTabRequest.pending.value = null;
+    if (index >= 0 && index <= 3) _onTap(index);
   }
 
   @override

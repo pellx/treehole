@@ -7,6 +7,7 @@ import '../../theme/app_dimens_accent.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_confirm_dialog.dart';
 import '../../widgets/app_toast.dart';
+import 'dm_test_page.dart';
 import 'notification_settings_page.dart';
 import 'privacy_policy_page.dart';
 import 'settings_navigation.dart';
@@ -105,6 +106,17 @@ class _SettingsPageState extends State<SettingsPage> {
             value: _debugMode,
             onChanged: (v) => setState(() => _debugMode = v),
           ),
+          if (_debugMode) ...[
+            _itemDivider(colors),
+            _navTile(
+              context,
+              icon: Icons.science_outlined,
+              label: '消息模块测试',
+              onTap: () => Navigator.of(
+                context,
+              ).push(topDownRoute(const DmTestPage())),
+            ),
+          ],
           _itemDivider(colors),
         ],
       ),

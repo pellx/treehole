@@ -129,6 +129,8 @@ class DmConversationTile extends StatelessWidget {
                   children: [
                     UserAvatar(
                       url: peer?['avatar_url'] as String?,
+                      // 仅消息模块测试数据会带 avatar_asset，正式数据为 null。
+                      assetPath: peer?['avatar_asset'] as String?,
                       radius: AppDmTheme.avatarSize / 2,
                       backgroundColor: theme.colorScheme.surface,
                     ),

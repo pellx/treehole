@@ -5,6 +5,7 @@ import '../../services/dm_api.dart';
 import '../../services/account_display.dart';
 import '../../services/dm_notifications.dart';
 import '../../services/dm_inbox.dart';
+import '../../services/dm_mock_data.dart';
 import '../../services/realtime_service.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_bottom_sheet.dart';
@@ -15,6 +16,7 @@ import '../../theme/app_dm_theme.dart';
 import '../../theme/app_messages_theme.dart';
 import '../account/register_page.dart';
 import 'dm_chat_page.dart';
+import 'dm_mock_chat_page.dart';
 import 'system_inbox_page.dart';
 
 class MessagesPage extends StatefulWidget {
@@ -43,6 +45,14 @@ class _MessagesPageState extends State<MessagesPage>
   StreamSubscription? _realtimeSubscription;
   bool _requiresLogin = false;
   bool _notificationsEnabled = false;
+
+  /// 设置里的「消息模块测试」是否开启：开启后列表与聊天页全部走内存假数据。
+  bool get _mock => DmMockData.instance.enabled;
+
+  void _onMockChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
 
   Future<void> _prefetchSystemInboxes(DmApi api) async {
     await Future.wait([
@@ -79,6 +89,7 @@ class _MessagesPageState extends State<MessagesPage>
     });
     WidgetsBinding.instance.addObserver(this);
     accountDisplayEpoch.addListener(_accountChanged);
+    DmMockData.instance.addListener(_onMockChanged);
     unawaited(_refreshNotificationPermission());
     _scheduleReload();
   }
@@ -131,6 +142,18 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _load({bool reset = false, bool silent = false}) async {
+    if (_mock) {
+      // 测试模式：数据完全来自内存，不初始化 DmApi、不发任何请求。
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _initializing = false;
+          _failed = false;
+          _requiresLogin = false;
+        });
+      }
+      return;
+    }
     if (_busy) return;
     final generation = ++_generation;
     setState(() {
@@ -250,6 +273,16 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _open(Map<String, dynamic> conversation) async {
+    if (_mock) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) =>
+              DmMockChatPage(conversationId: conversation['id'] as int),
+        ),
+      );
+      if (mounted) setState(() {});
+      return;
+    }
     if (_api == null || _userId == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -265,6 +298,10 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _openSystemInbox(String category, String title) async {
+    if (_mock) {
+      showAppToast(context, message: '测试模式下系统消息暂未接入');
+      return;
+    }
     if (_openingSystemInbox || (_busy && _api == null)) return;
     if (_api == null || _userId == null) {
       await _login();
@@ -305,6 +342,13 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _create() async {
+    if (_mock) {
+      DmMockData.instance.spawnOutgoingRequest();
+      if (mounted) {
+        showAppToast(context, message: '已发送私信请求，等待对方接受');
+      }
+      return;
+    }
     if (_busy || _api == null || _userId == null) return;
     final peer = await showDialog<int>(
       context: context,
@@ -335,6 +379,19 @@ class _MessagesPageState extends State<MessagesPage>
 
   /// 处理陌生人私信请求：接受后双方可正常发送，拒绝进入 24 小时冷却。
   Future<void> _respond(Map<String, dynamic> item, bool accept) async {
+    if (_mock) {
+      if (accept) {
+        DmMockData.instance.accept(item['id'] as int);
+      } else {
+        DmMockData.instance.reject(item['id'] as int);
+      }
+      if (!mounted) return;
+      showAppToast(
+        context,
+        message: accept ? '已接受私信请求' : '已拒绝私信请求',
+      );
+      return;
+    }
     if (_busy || _api == null) return;
     setState(() => _busy = true);
     try {
@@ -361,6 +418,11 @@ class _MessagesPageState extends State<MessagesPage>
   }
 
   Future<void> _clearUnread() async {
+    if (_mock) {
+      DmMockData.instance.markAllRead();
+      if (mounted) showAppToast(context, message: '已清理未读消息');
+      return;
+    }
     if (_busy || _api == null || _userId == null) return;
     setState(() => _busy = true);
     try {
@@ -406,6 +468,7 @@ class _MessagesPageState extends State<MessagesPage>
     _realtimeSubscription?.cancel();
     _api?.close();
     accountDisplayEpoch.removeListener(_accountChanged);
+    DmMockData.instance.removeListener(_onMockChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -415,6 +478,12 @@ class _MessagesPageState extends State<MessagesPage>
     final messagesTheme = AppMessagesTheme.forBrightness(
       Theme.of(context).brightness,
     );
+    final showMock = _mock;
+    final visibleItems = showMock ? DmMockData.instance.conversations : _items;
+    final systemCounts = showMock
+        ? const <String, dynamic>{'reply': 3, 'announcement': 2, 'moderation': 1}
+        : _systemCounts;
+    final selfUserId = showMock ? DmMockData.selfUserId : _userId;
     return AppScaffold(
       title: '消息',
       backgroundColor: Theme.of(context).brightness == Brightness.dark
@@ -502,22 +571,23 @@ class _MessagesPageState extends State<MessagesPage>
                       physics: const AlwaysScrollableScrollPhysics(),
                       itemCount:
                           1 +
-                          (_items.isEmpty
+                          (visibleItems.isEmpty
                               ? 1
-                              : _items.length + (_next == null ? 0 : 1)),
+                              : visibleItems.length +
+                                    (!showMock && _next != null ? 1 : 0)),
                       itemBuilder: (context, index) {
                         if (index == 0) {
                           return MessageInboxShortcuts(
-                            counts: _systemCounts,
-                            showUnread: _userId != null,
+                            counts: systemCounts,
+                            showUnread: selfUserId != null,
                             onOpen:
                                 _openingSystemInbox || (_busy && _api == null)
                                 ? null
                                 : _openSystemInbox,
                           );
                         }
-                        if (_items.isEmpty) {
-                          if (_busy || _initializing) {
+                        if (visibleItems.isEmpty) {
+                          if (!showMock && (_busy || _initializing)) {
                             return const SizedBox.shrink();
                           }
                           return Center(
@@ -532,7 +602,7 @@ class _MessagesPageState extends State<MessagesPage>
                                   const SizedBox(
                                     height: AppDmTheme.emptyTextGap,
                                   ),
-                                  if (_userId != null)
+                                  if (selfUserId != null)
                                     FilledButton(
                                       onPressed: _create,
                                       child: const Text('发起私信'),
@@ -553,7 +623,8 @@ class _MessagesPageState extends State<MessagesPage>
                           );
                         }
                         final conversationIndex = index - 1;
-                        if (conversationIndex == _items.length) {
+                        if (!showMock &&
+                            conversationIndex == visibleItems.length) {
                           return TextButton(
                             onPressed: _busy ? null : () => _load(),
                             child: const Text(
@@ -564,7 +635,11 @@ class _MessagesPageState extends State<MessagesPage>
                             ),
                           );
                         }
-                        final item = _items[conversationIndex];
+                        final item = visibleItems[conversationIndex];
+                        final canRespond =
+                            item['status'] == 'pending' &&
+                            item['is_requester'] != true &&
+                            (showMock || _api != null);
                         final gap =
                             AppMessagesTheme.conversationFirstTopPadding;
                         return Padding(
@@ -576,19 +651,15 @@ class _MessagesPageState extends State<MessagesPage>
                             child: DmConversationTile(
                               conversation: item,
                               isFirst: conversationIndex == 0,
-                              onTap: _api == null ? null : () => _open(item),
-                              onAccept:
-                                  _api == null ||
-                                      item['status'] != 'pending' ||
-                                      item['is_requester'] == true
-                                  ? null
-                                  : () => _respond(item, true),
-                              onReject:
-                                  _api == null ||
-                                      item['status'] != 'pending' ||
-                                      item['is_requester'] == true
-                                  ? null
-                                  : () => _respond(item, false),
+                              onTap: (showMock || _api != null)
+                                  ? () => _open(item)
+                                  : null,
+                              onAccept: canRespond
+                                  ? () => _respond(item, true)
+                                  : null,
+                              onReject: canRespond
+                                  ? () => _respond(item, false)
+                                  : null,
                             ),
                           ),
                         );
