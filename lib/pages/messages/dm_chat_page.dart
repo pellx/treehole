@@ -5,6 +5,7 @@ import '../../services/dm_api.dart';
 import '../../services/dm_inbox.dart';
 import '../../services/dm_notifications.dart';
 import '../../services/realtime_service.dart';
+import '../../theme/app_dm_theme.dart';
 import '../../widgets/app_app_bar.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/user_avatar.dart';
@@ -402,6 +403,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
   }
 
   /// 未接受状态下的提示条：接收方可同意/拒绝，发起方只看到等待提示。
+  /// 尺寸、透明度与按钮高度见 [AppDmTheme] 的 banner* 参数。
   Widget _requestBanner() {
     final colors = Theme.of(context).colorScheme;
     final rejected = _status == 'rejected';
@@ -412,30 +414,57 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
         : (rejected ? '你已拒绝该私信请求' : '对方请求与你私信，接受后才能互发消息');
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.fromLTRB(
+        AppDmTheme.bannerHorizontalMargin,
+        0,
+        AppDmTheme.bannerHorizontalMargin,
+        AppDmTheme.bannerBottomMargin,
+      ),
+      padding: const EdgeInsets.all(AppDmTheme.bannerPadding),
       decoration: BoxDecoration(
-        color: colors.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
+        color: colors.primary.withValues(alpha: AppDmTheme.bannerBackgroundAlpha),
+        borderRadius: BorderRadius.circular(AppDmTheme.bannerRadius),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(text, style: TextStyle(color: colors.onSurface)),
+          Text(
+            text,
+            style: TextStyle(
+              color: colors.onSurface,
+              fontSize: AppDmTheme.bannerTextFontSize,
+            ),
+          ),
           if (_status == 'pending' && !_isRequester) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppDmTheme.bannerActionTopGap),
             Row(
               children: [
-                OutlinedButton(
-                  onPressed: _responding
-                      ? null
-                      : () => _respondRequest(false),
-                  child: const Text('拒绝'),
+                SizedBox(
+                  height: AppDmTheme.bannerButtonMinHeight,
+                  child: OutlinedButton(
+                    onPressed: _responding
+                        ? null
+                        : () => _respondRequest(false),
+                    child: const Text(
+                      '拒绝',
+                      style: TextStyle(
+                        fontSize: AppDmTheme.bannerButtonFontSize,
+                      ),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _responding ? null : () => _respondRequest(true),
-                  child: const Text('同意'),
+                const SizedBox(width: AppDmTheme.bannerButtonGap),
+                SizedBox(
+                  height: AppDmTheme.bannerButtonMinHeight,
+                  child: FilledButton(
+                    onPressed: _responding ? null : () => _respondRequest(true),
+                    child: const Text(
+                      '同意',
+                      style: TextStyle(
+                        fontSize: AppDmTheme.bannerButtonFontSize,
+                      ),
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -486,11 +515,20 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
           children: [
             Expanded(
               child: visibleMessages.isEmpty
-                  ? Center(child: Text(_loaded ? '还没有消息，打个招呼吧' : ''))
+                  ? Center(
+                      child: Text(
+                        _loaded ? '还没有消息，打个招呼吧' : '',
+                        style: const TextStyle(
+                          fontSize: AppDmTheme.emptyChatFontSize,
+                        ),
+                      ),
+                    )
                   : ListView.builder(
                       controller: _scroll,
                       reverse: true,
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(
+                        AppDmTheme.messageListPadding,
+                      ),
                       itemCount:
                           visibleMessages.length + (_next == null ? 0 : 1),
                       itemBuilder: (context, index) {
@@ -499,7 +537,12 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                             onPressed: _busy || _sending
                                 ? null
                                 : () => _load(older: true),
-                            child: const Text('加载更早消息'),
+                            child: const Text(
+                              '加载更早消息',
+                              style: TextStyle(
+                                fontSize: AppDmTheme.loadOlderFontSize,
+                              ),
+                            ),
                           );
                         }
                         final item = visibleMessages[index];
@@ -516,15 +559,25 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                               : Alignment.centerLeft,
                           child: Container(
                             constraints: BoxConstraints(
-                              maxWidth: MediaQuery.sizeOf(context).width * .78,
+                              maxWidth:
+                                  MediaQuery.sizeOf(context).width *
+                                  AppDmTheme.bubbleMaxWidthRatio,
                             ),
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(12),
+                            margin: const EdgeInsets.only(
+                              bottom: AppDmTheme.bubbleBottomGap,
+                            ),
+                            padding: const EdgeInsets.all(
+                              AppDmTheme.bubblePadding,
+                            ),
                             decoration: BoxDecoration(
                               color: mine
-                                  ? colors.primary.withValues(alpha: 0.16)
+                                  ? colors.primary.withValues(
+                                      alpha: AppDmTheme.bubbleMineAlpha,
+                                    )
                                   : colors.surface,
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(
+                                AppDmTheme.bubbleRadius,
+                              ),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -535,19 +588,20 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                                               ? _selfProfile
                                               : _peerProfile)?['avatar_url']
                                           as String?,
-                                  radius: 16,
+                                  radius: AppDmTheme.bubbleAvatarRadius,
                                   backgroundColor: colors.surface,
                                 ),
-                                const SizedBox(height: 6),
+                                const SizedBox(
+                                  height: AppDmTheme.bubbleAvatarGap,
+                                ),
                                 Text(
                                   item['content'] as String,
                                   style: TextStyle(
-                                    color: mine
-                                        ? colors.onSurface
-                                        : colors.onSurface,
+                                    color: colors.onSurface,
+                                    fontSize: AppDmTheme.messageTextFontSize,
                                   ),
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: AppDmTheme.bubbleTimeGap),
                                 if (item['local_status'] == 'failed')
                                   Align(
                                     alignment: Alignment.centerRight,
@@ -557,7 +611,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                                       icon: Icon(
                                         Icons.error_outline,
                                         color: colors.error,
-                                        size: 20,
+                                        size: AppDmTheme.failedIconSize,
                                       ),
                                       onPressed: _sending || _busy || !_canSend
                                           ? null
@@ -576,7 +630,7 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                                 Text(
                                   time,
                                   style: TextStyle(
-                                    fontSize: 11,
+                                    fontSize: AppDmTheme.bubbleTimeFontSize,
                                     color: mine
                                         ? colors.onSurface
                                         : colors.onSurfaceVariant,
@@ -592,7 +646,12 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
             if (_status != 'accepted') _requestBanner(),
             if (_status == 'accepted')
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                padding: const EdgeInsets.fromLTRB(
+                  AppDmTheme.composerHorizontalPadding,
+                  AppDmTheme.composerTopPadding,
+                  AppDmTheme.composerHorizontalPadding,
+                  AppDmTheme.composerBottomPadding,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -600,9 +659,12 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                       child: TextField(
                         controller: _input,
                         readOnly: _sending || !_canSend,
-                        minLines: 1,
-                        maxLines: 4,
-                        maxLength: 2000,
+                        minLines: AppDmTheme.composerMinLines,
+                        maxLines: AppDmTheme.composerMaxLines,
+                        maxLength: AppDmTheme.composerMaxLength,
+                        style: const TextStyle(
+                          fontSize: AppDmTheme.composerFontSize,
+                        ),
                         decoration: InputDecoration(
                           hintText: _canSend ? '输入私信' : '当前无法发送私信',
                           counterText: '',
@@ -610,10 +672,15 @@ class _DmChatPageState extends State<DmChatPage> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AppDmTheme.composerSendGap),
                     FilledButton(
                       onPressed: _busy || _sending || !_canSend ? null : _send,
-                      child: const Text('发送'),
+                      child: const Text(
+                        '发送',
+                        style: TextStyle(
+                          fontSize: AppDmTheme.composerSendFontSize,
+                        ),
+                      ),
                     ),
                   ],
                 ),

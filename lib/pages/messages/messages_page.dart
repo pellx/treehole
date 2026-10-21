@@ -11,6 +11,7 @@ import '../../widgets/app_bottom_sheet.dart';
 import '../../widgets/app_toast.dart';
 import '../../widgets/dm_conversation_tile.dart';
 import '../../widgets/message_inbox_shortcuts.dart';
+import '../../theme/app_dm_theme.dart';
 import '../../theme/app_messages_theme.dart';
 import '../account/register_page.dart';
 import 'dm_chat_page.dart';
@@ -521,12 +522,16 @@ class _MessagesPageState extends State<MessagesPage>
                           }
                           return Center(
                             child: Padding(
-                              padding: const EdgeInsets.only(top: 48),
+                              padding: const EdgeInsets.only(
+                                top: AppDmTheme.emptyTopPadding,
+                              ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(_failed ? '暂未获取到会话' : '还没有私信会话'),
-                                  const SizedBox(height: 12),
+                                  const SizedBox(
+                                    height: AppDmTheme.emptyTextGap,
+                                  ),
                                   if (_userId != null)
                                     FilledButton(
                                       onPressed: _create,
@@ -551,7 +556,12 @@ class _MessagesPageState extends State<MessagesPage>
                         if (conversationIndex == _items.length) {
                           return TextButton(
                             onPressed: _busy ? null : () => _load(),
-                            child: const Text('加载更多会话'),
+                            child: const Text(
+                              '加载更多会话',
+                              style: TextStyle(
+                                fontSize: AppDmTheme.loadMoreFontSize,
+                              ),
+                            ),
                           );
                         }
                         final item = _items[conversationIndex];
@@ -592,7 +602,7 @@ class _MessagesPageState extends State<MessagesPage>
           if (_openingSystemInbox)
             const Positioned.fill(
               child: ColoredBox(
-                color: Color(0x33000000),
+                color: AppDmTheme.loadingOverlayColor,
                 child: Center(child: CircularProgressIndicator()),
               ),
             ),

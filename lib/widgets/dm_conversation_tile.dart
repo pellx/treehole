@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import '../services/timezone_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_dm_theme.dart';
 import '../theme/app_messages_theme.dart';
 import 'user_avatar.dart';
 
 /// 会话行：头像、昵称、最近消息，右侧时间和未读标记。
 /// 未接受的私信请求显示「请求」标记与同意/拒绝按钮。
+///
+/// 所有尺寸都在 [AppDmTheme] 中调整，这里只负责取值与布局。
 class DmConversationTile extends StatelessWidget {
   final Map<String, dynamic> conversation;
   final VoidCallback? onTap;
@@ -47,14 +50,19 @@ class DmConversationTile extends StatelessWidget {
     return TextButton(
       onPressed: onPressed,
       style: TextButton.styleFrom(
-        minimumSize: const Size(0, 28),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
+        minimumSize: const Size(0, AppDmTheme.requestButtonMinHeight),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppDmTheme.requestButtonHorizontalPadding,
+        ),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         foregroundColor: primary
             ? Theme.of(context).colorScheme.primary
             : AppMessagesTheme.secondaryLight,
       ),
-      child: Text(label, style: const TextStyle(fontSize: 12)),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: AppDmTheme.requestButtonFontSize),
+      ),
     );
   }
 
@@ -97,20 +105,22 @@ class DmConversationTile extends StatelessWidget {
       children: [
         Material(
           color: pinned
-              ? theme.colorScheme.primary.withValues(alpha: 0.06)
+              ? theme.colorScheme.primary.withValues(
+                  alpha: AppDmTheme.pinnedBackgroundAlpha,
+                )
               : Colors.transparent,
           child: InkWell(
             onTap: onTap,
             child: ConstrainedBox(
               constraints: BoxConstraints(
-                minHeight: isFirst ? 0 : AppMessagesTheme.conversationMinHeight,
+                minHeight: isFirst ? 0 : AppDmTheme.conversationMinHeight,
               ),
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
-                  AppMessagesTheme.conversationHorizontalPadding,
-                  isFirst ? 0 : AppMessagesTheme.conversationVerticalPadding,
-                  AppMessagesTheme.conversationHorizontalPadding,
-                  AppMessagesTheme.conversationVerticalPadding,
+                  AppDmTheme.conversationHorizontalPadding,
+                  isFirst ? 0 : AppDmTheme.conversationVerticalPadding,
+                  AppDmTheme.conversationHorizontalPadding,
+                  AppDmTheme.conversationVerticalPadding,
                 ),
                 child: Row(
                   crossAxisAlignment: isFirst
@@ -119,12 +129,10 @@ class DmConversationTile extends StatelessWidget {
                   children: [
                     UserAvatar(
                       url: peer?['avatar_url'] as String?,
-                      radius: AppMessagesTheme.conversationAvatarSize / 2,
+                      radius: AppDmTheme.avatarSize / 2,
                       backgroundColor: theme.colorScheme.surface,
                     ),
-                    const SizedBox(
-                      width: AppMessagesTheme.conversationAvatarGap,
-                    ),
+                    const SizedBox(width: AppDmTheme.avatarGap),
                     Expanded(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -135,10 +143,10 @@ class DmConversationTile extends StatelessWidget {
                               if (pinned) ...[
                                 Icon(
                                   Icons.push_pin,
-                                  size: 13,
+                                  size: AppDmTheme.pinIconSize,
                                   color: secondary,
                                 ),
-                                const SizedBox(width: 5),
+                                const SizedBox(width: AppDmTheme.pinIconGap),
                               ],
                               Expanded(
                                 child: Text(
@@ -146,49 +154,52 @@ class DmConversationTile extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: AppMessagesTheme
-                                        .conversationTitleFontSize,
+                                    fontSize: AppDmTheme.titleFontSize,
                                     fontWeight: FontWeight.w500,
                                     color: colors.common.onSurface,
                                   ),
                                 ),
                               ),
                               if (pending) ...[
-                                const SizedBox(width: 6),
+                                const SizedBox(
+                                  width: AppDmTheme.requestTagGap,
+                                ),
                                 Container(
                                   padding: const EdgeInsets.symmetric(
-                                    horizontal: 5,
-                                    vertical: 1,
+                                    horizontal:
+                                        AppDmTheme.requestTagHorizontalPadding,
+                                    vertical:
+                                        AppDmTheme.requestTagVerticalPadding,
                                   ),
                                   decoration: BoxDecoration(
                                     color: theme.colorScheme.primary.withValues(
-                                      alpha: 0.12,
+                                      alpha: AppDmTheme.requestTagBackgroundAlpha,
                                     ),
-                                    borderRadius: BorderRadius.circular(4),
+                                    borderRadius: BorderRadius.circular(
+                                      AppDmTheme.requestTagRadius,
+                                    ),
                                   ),
                                   child: Text(
                                     '请求',
                                     style: TextStyle(
-                                      fontSize: 10,
+                                      fontSize: AppDmTheme.requestTagFontSize,
                                       color: theme.colorScheme.primary,
                                     ),
                                   ),
                                 ),
                               ],
                               if (time.isNotEmpty) ...[
-                                const SizedBox(width: 12),
+                                const SizedBox(width: AppDmTheme.timeGap),
                                 ConstrainedBox(
                                   constraints: const BoxConstraints(
-                                    maxWidth: AppMessagesTheme
-                                        .conversationTimeMaxWidth,
+                                    maxWidth: AppDmTheme.timeMaxWidth,
                                   ),
                                   child: Text(
                                     time,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                      fontSize: AppMessagesTheme
-                                          .conversationTimeFontSize,
+                                      fontSize: AppDmTheme.timeFontSize,
                                       color: secondary,
                                     ),
                                   ),
@@ -196,9 +207,7 @@ class DmConversationTile extends StatelessWidget {
                               ],
                             ],
                           ),
-                          const SizedBox(
-                            height: AppMessagesTheme.conversationTextGap,
-                          ),
+                          const SizedBox(height: AppDmTheme.textGap),
                           Row(
                             children: [
                               Expanded(
@@ -206,8 +215,7 @@ class DmConversationTile extends StatelessWidget {
                                   alignment: Alignment.centerLeft,
                                   child: ConstrainedBox(
                                     constraints: const BoxConstraints(
-                                      maxWidth: AppMessagesTheme
-                                          .conversationPreviewMaxWidth,
+                                      maxWidth: AppDmTheme.previewMaxWidth,
                                     ),
                                     child: Text(
                                       preview,
@@ -215,8 +223,7 @@ class DmConversationTile extends StatelessWidget {
                                       softWrap: false,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
-                                        fontSize: AppMessagesTheme
-                                            .conversationPreviewFontSize,
+                                        fontSize: AppDmTheme.previewFontSize,
                                         color: secondary,
                                       ),
                                     ),
@@ -224,33 +231,34 @@ class DmConversationTile extends StatelessWidget {
                                 ),
                               ),
                               if (pending && !requester && onAccept != null) ...[
-                                const SizedBox(width: 6),
+                                const SizedBox(
+                                  width: AppDmTheme.requestButtonGap,
+                                ),
                                 _requestButton(context, '拒绝', onReject, false),
                                 _requestButton(context, '同意', onAccept, true),
                               ],
                               if (muted) ...[
-                                const SizedBox(width: 8),
+                                const SizedBox(width: AppDmTheme.muteIconGap),
                                 Icon(
                                   Icons.notifications_off_outlined,
-                                  size: 13,
+                                  size: AppDmTheme.muteIconSize,
                                   color: secondary,
                                 ),
                               ],
                               if (count > 0) ...[
-                                const SizedBox(width: 10),
+                                const SizedBox(width: AppDmTheme.unreadGap),
                                 Semantics(
                                   label: muted ? '免打扰，有未读消息' : '$count 条未读消息',
                                   child: Badge(
-                                    smallSize: AppMessagesTheme.unreadDotSize,
-                                    largeSize: AppMessagesTheme.unreadBadgeSize,
+                                    smallSize: AppDmTheme.unreadDotSize,
+                                    largeSize: AppDmTheme.unreadBadgeSize,
                                     backgroundColor:
                                         AppMessagesTheme.unreadColor,
                                     textColor: Colors.white,
                                     textStyle: TextStyle(
                                       fontFamily:
                                           theme.textTheme.bodySmall?.fontFamily,
-                                      fontSize:
-                                          AppMessagesTheme.unreadBadgeFontSize,
+                                      fontSize: AppDmTheme.unreadBadgeFontSize,
                                     ),
                                     label: muted
                                         ? null
@@ -274,8 +282,8 @@ class DmConversationTile extends StatelessWidget {
             left: AppMessagesTheme.conversationDividerIndent,
           ),
           child: Divider(
-            height: 1,
-            thickness: 0.5,
+            height: AppDmTheme.dividerHeight,
+            thickness: AppDmTheme.dividerThickness,
             color: dark
                 ? AppMessagesTheme.dividerDark
                 : AppMessagesTheme.dividerLight,

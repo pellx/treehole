@@ -102,3 +102,6 @@ tmp_backend_patch/
 *.mobileprovision
 **/GoogleService-Info.plist
 **/google-services.json
+
+# 手动修改前的原文件备份（不入库）
+bak/
